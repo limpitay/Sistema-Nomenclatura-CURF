@@ -8,12 +8,12 @@ const TIPOS_CON_USUARIO = ['PC', 'TT', 'LL', 'NB'];
 
 // Estos tipos arman el hostname como Tipo-Edificio-Piso-Número (sin Sector en el código,
 // aunque el campo Sector se sigue pidiendo en el formulario para reportes internos)
-const TIPOS_SIN_SECTOR_EN_CODIGO = ['TT', 'LL', 'CAM', 'FID'];
+const TIPOS_SIN_SECTOR_EN_CODIGO = ['TT', 'LL', 'CAM','FID'];
 
 // Cuando el Sector elegido es Consultorio, el "Número" no se autogenera:
 // lo carga el técnico a mano (es el número físico del consultorio), y el
 // hostname no lleva el código de Tipo (Edificio-Piso-Sector-Número)
-const SECTOR_CONSULTORIO = 'CON';
+const SECTOR_CONSULTORIO = 'CONS';
 
 export default function Builder() {
   const { user, logout } = useAuth();
@@ -251,6 +251,7 @@ useEffect(() => {
   return (
     <div style={s.page}>
       {/* ── Header ── */}
+
       <div style={s.header}>
         <div>
           <span style={s.pill}>CURF</span>
@@ -259,9 +260,15 @@ useEffect(() => {
         <div style={s.headerRight}>
           <span style={s.userChip}>👤 {user?.nombre}</span>
           <button style={s.btnGhost} onClick={() => navigate('/historial')}>Historial</button>
-          {user?.rol === 'admin' && (
-            <button style={s.btnGhost} onClick={() => navigate('/admin')}>Admin</button>
-          )}
+          
+          {/* Botón Admin Corregido y Limpio */}
+          {/* Reemplazá el botón viejo de Admin por este: */}
+{user?.rol === 'admin' && (
+  <button style={s.btnGhost} onClick={() => window.location.href = '/admin'}>
+    Admin
+  </button>
+)}
+          
           <button style={s.btnGhost} onClick={logout}>Salir</button>
         </div>
       </div>
