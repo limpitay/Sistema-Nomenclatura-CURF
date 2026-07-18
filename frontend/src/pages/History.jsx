@@ -105,7 +105,7 @@ export default function History() {
         <div style={s.headerRight}>
           <span style={s.userChip}>👤 {user?.nombre}</span>
           <button style={s.btnGhost} onClick={() => navigate('/')}>Constructor</button>
-          <button style={s.btnGhost} onClick={logout}>Salir</button>
+          <button onClick={logout}>Salir</button>
         </div>
       </div>
 
@@ -293,7 +293,7 @@ const s = {
   mono:       { fontFamily:'monospace', fontSize:12 },
   btnDetail:  { fontSize:11, padding:'3px 10px', borderRadius:4, cursor:'pointer', border:'1px solid #c8c6bc', background:'#fff', color:'#585754' },
   btnPrimary: { background:'#1a52be', color:'#fff', border:'none', borderRadius:6, padding:'8px 16px', fontSize:13, fontWeight:600, cursor:'pointer' },
-  btnGhost:   { background:'transparent', color:'#585754', border:'1px solid #c8c6bc', borderRadius:6, padding:'8px 12px', fontSize:13, cursor:'pointer' },
+btnGhost:   { background:'#f8f9fa', color:'#1a52be', border:'1px solid #1a52be', borderRadius:6, padding:'8px 14px', fontSize:13, fontWeight:600, cursor:'pointer', marginRight:4 },  errorBox: { background:'#fceaea', color:'#b83030', padding:10, borderRadius:6, marginTop:10, fontSize:13 },
   empty:      { textAlign:'center', padding:'40px 20px', color:'#999', fontSize:13 },
   overlay:    { position:'fixed', inset:0, background:'rgba(0,0,0,.4)', zIndex:100, display:'flex', alignItems:'center', justifyContent:'center' },
   modal:      { background:'#fff', borderRadius:12, border:'1px solid #dddbd3', padding:24, width:'100%', maxWidth:560, maxHeight:'90vh', overflowY:'auto' },
