@@ -29,6 +29,7 @@ export default function Builder() {
   // Campos adicionales del formulario
   const [nextNum, setNextNum] = useState('');
   const [usuario, setUsuario] = useState('');
+  const [serie, setSerie] = useState('');
   const [notas, setNotas] = useState('');
 
   const [hostname, setHostname] = useState('');
@@ -40,6 +41,10 @@ export default function Builder() {
   const [saved, setSaved] = useState(null);
   const [error, setError] = useState('');
 
+  // Flag dinámico: Las PC y NB son las únicas que operan con Sector de forma obligatoria
+  const esComputadora = tipoCode === 'PC' || tipoCode === 'NB';
+  const esConsultorio = sectorCode === SECTOR_CONSULTORIO;
+
   // ── 1. Carga inicial de Edificios, Tipos y Sectores desde la Base de Datos ──────
   useEffect(() => {
     client.get('/nomenclatures/catalogs/buildings')
@@ -50,7 +55,6 @@ export default function Builder() {
       .then(res => setTipos(res.data))
       .catch(err => console.error('Error al traer tipos desde BD:', err));
 
-    // Los sectores ahora son un catálogo global: no dependen del piso/edificio
     client.get('/nomenclatures/catalogs/sectors')
       .then(res => setSectores(res.data))
       .catch(err => console.error('Error al traer sectores desde BD:', err));
@@ -69,45 +73,29 @@ export default function Builder() {
       .catch(err => console.error('Error al traer pisos dependientes:', err));
   }, [edifId]);
 
-  // ── 4. Consulta del Próximo Número Secuencial (Enviando IDs numéricos) ──────
-// ── 4. Consulta del Próximo Número Secuencial (Búsqueda forzada de IDs numéricos) ──────
-useEffect(() => {
-  const esConsultorio = sectorCode === SECTOR_CONSULTORIO;
+  // ── 4. Consulta del Próximo Número Secuencial ──────
+  useEffect(() => {
+    // Si es consultorio, el número se escribe a mano, no le pedimos nada al backend
+    if (esConsultorio) { 
+      return; 
+    }
 
-  // Consultorio: el número lo escribe el técnico a mano, no se autogenera
-  if (esConsultorio) { 
-    setNextNum(''); 
-    return; 
-  }
+    if (!edifId || !tipoId) { setNextNum(''); return; }
+    if (esComputadora && !sectorId) { setNextNum(''); return; }
 
-  // Buscamos el objeto real en los catálogos usando los códigos actuales
-  const edificioReal = edificios.find(e => e.code === edifCode || e.id === edifId);
-  const tipoReal = tipos.find(t => t.code === tipoCode || t.id === tipoId);
-  const sectorReal = sectores.find(s => s.code === sectorCode || s.id === sectorId);
-  const sinSector = TIPOS_SIN_SECTOR_EN_CODIGO.includes(tipoCode);
-
-  // Si no tenemos los IDs correspondientes, no ejecutamos la petición
-  // (Sector solo es obligatorio para los tipos que sí lo usan)
-  if (!edificioReal?.id || !tipoReal?.id || (!sinSector && !sectorReal?.id)) { 
-    setNextNum(''); 
-    return; 
-  }
-
-  client.get('/nomenclatures/next', { 
-    params: sinSector
-      ? { tipo: tipoReal.id, edificio: edificioReal.id }                        // TT, LL, CAM: sin sector
-      : { tipo: tipoReal.id, edificio: edificioReal.id, sector: sectorReal.id } // PC, NB, resto
-  })
-    .then(res => setNextNum(res.data.next))
-    .catch(() => setNextNum('01')); // Respaldo por si la base de datos está vacía
-}, [edifCode, tipoCode, sectorCode, edificios, tipos, sectores]);
+    client.get('/nomenclatures/next', { 
+      params: { tipo: tipoId, edificio: edifId, sector: esComputadora ? sectorId : undefined } 
+    })
+      .then(res => setNextNum(res.data.next))
+      .catch(() => setNextNum('01'));
+  }, [edifId, tipoId, sectorId, esComputadora, esConsultorio]);
 
   // ── 5. Construcción dinámica de la cadena del Hostname usando Códigos ──────
   useEffect(() => {
-    const { hostname: hn, display: disp } = buildHostname({ edifCode, tipoCode, pisoCode, sectorCode, nextNum });
+    const { hostname: hn, display: disp } = buildHostname({ edifCode, tipoCode, pisoCode, sectorCode, nextNum, esConsultorio });
     setHostname(hn);
     setDisplay(disp);
-  }, [edifCode, tipoCode, pisoCode, sectorCode, nextNum]);
+  }, [edifCode, tipoCode, pisoCode, sectorCode, nextNum, esComputadora, esConsultorio]);
 
   // ── Temporizador de la reserva ───────────────────────────────
   useEffect(() => {
@@ -123,7 +111,6 @@ useEffect(() => {
     }
   }, [locked, lockTimer]);
 
-  // ── Ejecutar reserva temporal en Redis ────────────────────────
   const handleLock = async () => {
     if (!hostname) return;
     setLockMsg(''); setError('');
@@ -131,54 +118,37 @@ useEffect(() => {
       const res = await client.post('/nomenclatures/lock', { hostname });
       setLocked(true);
       setLockTimer(res.data.expires_in);
-      setLockMsg('');
     } catch (err) {
       const d = err.response?.data;
       if (d?.locked_by) {
-        const m = Math.ceil(d.expires_in / 60);
-        setLockMsg(`🔒 Reservado por ${d.locked_by} — expira en ${m} min`);
+        setLockMsg(`🔒 Reservado por ${d.locked_by} — expira en ${Math.ceil(d.expires_in / 60)} min`);
       } else {
         setLockMsg(d?.error || 'Error al reservar');
       }
     }
   };
 
-  // ── Confirmar y Guardar en PostgreSQL ─────────────────────────
   const handleSave = async () => {
     const requiereUsuario = TIPOS_CON_USUARIO.includes(tipoCode);
 
-    if (!locked)   { setError('Reservá el hostname antes de guardar.'); return; }
-    if (requiereUsuario && !usuario) { setError('El usuario Windows es obligatorio para este tipo de dispositivo.'); return; }
-
-    const sinSector = TIPOS_SIN_SECTOR_EN_CODIGO.includes(tipoCode);
-
-    // Control para evitar el envío de NaNs en el sequential_number
-    const parsedSeq = parseInt(nextNum, 10);
-    const finalSequence = isNaN(parsedSeq) ? 1 : parsedSeq;
-
-    // Debug en consola para auditar qué IDs se están por enviar en la petición
-    console.log("Enviando Payload a la API:", { 
-      hostname, 
-      tipo: tipoId, 
-      edificio: edifId, 
-      sector: sinSector ? null : sectorId, 
-      sequential_number: finalSequence 
-    });
+    if (!locked) { setError('Reservá el hostname antes de guardar.'); return; }
+    if (requiereUsuario && !usuario.trim()) { setError('El usuario Windows es obligatorio para este equipo.'); return; }
 
     setSaving(true); setError('');
     try {
-      const res = await client.post('/nomenclatures', {
+      await client.post('/nomenclatures', {
         hostname,
-        tipo: Number(tipoId) || 1,                          // Forzamos conversión a número
-        edificio: Number(edifId) || 1,                      // Forzamos conversión a número
-        sector: sinSector ? null : (Number(sectorId) || 1),  // TT/LL/CAM no llevan sector
-        sequential_number: finalSequence,       // Número entero garantizado
+        tipo: Number(tipoId),
+        edificio: Number(edifId),
+        floor_id: Number(pisoId),
+        sector: esComputadora ? Number(sectorId) : null,
+        sequential_number: parseInt(nextNum, 10),
         usuario_windows: requiereUsuario ? usuario : null,
-        notes: notas || null
+        numero_serie: serie || null,
+        notas: notas || null
       });
-      setSaved(res.data);
-      setLocked(false); 
-      setLockTimer(0);
+      setSaved({ hostname });
+      setLocked(false);
     } catch (err) {
       setError(err.response?.data?.error || 'Error al guardar');
     } finally {
@@ -186,37 +156,21 @@ useEffect(() => {
     }
   };
 
-  // ── Resetear Formulario ──────────────────────────────────
   const handleClear = () => {
     setEdifId(''); setEdifCode('');
     setTipoId(''); setTipoCode('');
     setPisoId(''); setPisoCode('');
     setSectorId(''); setSectorCode('');
-    setUsuario(''); setNotas('');
+    setUsuario(''); setSerie(''); setNotas('');
     setLocked(false); setLockTimer(0);
     setLockMsg(''); setError(''); setSaved(null);
   };
 
   const fmtTime = s => `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`;
 
-  // Manejadores de cambios en listas desplegables
-  const handlePisoChange = (e) => {
-    const selectedId = e.target.value;
-    setPisoId(selectedId);
-    const obj = pisos.find(p => String(p.id) === String(selectedId));
-    setPisoCode(obj ? obj.code : '');
-  };
-
-  const handleSectorChange = (e) => {
-    const selectedId = e.target.value;
-    setSectorId(selectedId);
-    const obj = sectores.find(s => String(s.id) === String(selectedId));
-    setSectorCode(obj ? obj.code : '');
-  };
-
   return (
     <div style={s.page}>
-      {/* ── Header ── */}
+      {/* ── Header Corregido ── */}
       <div style={s.header}>
         <div>
           <span style={s.pill}>CURF</span>
@@ -230,192 +184,183 @@ useEffect(() => {
       </div>
 
       <div style={s.body}>
-        {saved && (
+        {saved ? (
           <div style={s.savedBox}>
             <div style={s.savedTitle}>✅ Hostname registrado con éxito</div>
-            <div style={s.savedHn}>{saved.generated_code || saved.hostname}</div>
-            <button style={{...s.btnPrimary, marginTop:12}} onClick={handleClear}>
-              Crear otro
-            </button>
+            <div style={s.savedHn}>{saved.hostname}</div>
+            <button style={{...s.btnPrimary, marginTop:12}} onClick={handleClear}>Crear otro</button>
           </div>
-        )}
-
-        {!saved && <>
-          {/* ── Bloque Edificios de Base de Datos ── */}
-          <div style={s.card}>
-            <div style={s.cardTitle}>Edificio</div>
-            <div style={s.gridSel3}>
-              {edificios.map(e => (
-                <div key={e.id}
-                  style={{...s.selBtn, ...(edifId === e.id ? s.selActive : {})}}
-                  onClick={() => { 
-                    setEdifId(e.id);     // Guarda la clave numérica primaria
-                    setEdifCode(e.code); // Guarda 'AU', 'LI', etc.
-                  }}>
-                  <div style={s.selCode}>{e.code}</div>
-                  <div style={s.selName}>{e.name}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* ── Bloque Tipos de Dispositivo de Base de Datos ── */}
-          <div style={s.card}>
-            <div style={s.cardTitle}>Tipo de dispositivo</div>
-            <div style={s.gridSel3}>
-              {tipos.map(t => (
-                <div key={t.id}
-                  style={{...s.selBtn, ...(tipoId === t.id ? s.selActive : {})}}
-                  onClick={() => { 
-                    setTipoId(t.id);     // Guarda la clave numérica primaria
-                    setTipoCode(t.code); // Guarda 'PC', 'CEL', etc.
-                  }}>
-                  <div style={{fontSize:20}}>📦</div>
-                  <div style={s.selCode}>{t.code}</div>
-                  <div style={s.selName}>{t.name}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* ── Desplegables Dinámicos ── */}
-          <div style={s.card}>
-            <div style={s.cardTitle}>Ubicación</div>
-            <div style={s.grid3}>
-              <div style={s.field}>
-                <label style={s.label}>Piso</label>
-                <select style={s.select} value={pisoId} onChange={handlePisoChange} disabled={!edifId}>
-                  <option value="">{edifId ? '-- Seleccionar --' : 'Elija Edificio primero'}</option>
-                  {pisos.map(p => <option key={p.id} value={p.id}>{p.name || p.code}</option>)}
-                </select>
+        ) : (
+          <>
+            {/* ── Bloque Edificios ── */}
+            <div style={s.card}>
+              <div style={s.cardTitle}>Edificio</div>
+              <div style={s.gridSel3}>
+                {edificios.map(e => (
+                  <div key={e.id}
+                    style={{...s.selBtn, ...(edifId === e.id ? s.selActive : {})}}
+                    onClick={() => { setEdifId(e.id); setEdifCode(e.code); }}>
+                    <div style={s.selCode}>{e.code}</div>
+                    <div style={s.selName}>{e.name}</div>
+                  </div>
+                ))}
               </div>
-              {!TIPOS_SIN_SECTOR_EN_CODIGO.includes(tipoCode) && (
+            </div>
+
+            {/* ── Bloque Tipos de Dispositivo ── */}
+            <div style={s.card}>
+              <div style={s.cardTitle}>Tipo de dispositivo</div>
+              <div style={s.gridSel3}>
+                {tipos.map(t => (
+                  <div key={t.id}
+                    style={{...s.selBtn, ...(tipoId === t.id ? s.selActive : {})}}
+                    onClick={() => { setTipoId(t.id); setTipoCode(t.code); }}>
+                    
+                    <div style={s.selCode}>{t.code}</div>
+                    <div style={s.selName}>{t.name}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* ── Desplegables Dinámicos ── */}
+            <div style={s.card}>
+              <div style={s.cardTitle}>Ubicación</div>
+              <div style={s.grid3}>
                 <div style={s.field}>
-                  <label style={s.label}>Sector</label>
-                  <select style={s.select} value={sectorId} onChange={handleSectorChange}>
-                    <option value="">-- Seleccionar --</option>
-                    {sectores.map(sec => <option key={sec.id} value={sec.id}>{sec.name} ({sec.code})</option>)}
+                  <label style={s.label}>Piso</label>
+                  <select style={s.select} value={pisoId} onChange={e => {
+                    setPisoId(e.target.value);
+                    const obj = pisos.find(p => String(p.id) === String(e.target.value));
+                    setPisoCode(obj ? obj.code : '');
+                  }} disabled={!edifId}>
+                    <option value="">{edifId ? '-- Seleccionar --' : 'Elija Edificio primero'}</option>
+                    {pisos.map(p => <option key={p.id} value={p.id}>{p.name || p.code}</option>)}
                   </select>
                 </div>
-              )}
-              <div style={s.field}>
-                <label style={s.label}>
-                  {sectorCode === SECTOR_CONSULTORIO ? 'Número de consultorio *' : 'Número (auto)'}
-                </label>
-                {sectorCode === SECTOR_CONSULTORIO ? (
-                  <input
-                    style={s.select}
-                    value={nextNum}
-                    onChange={e => setNextNum(e.target.value.replace(/\D/g, ''))}
-                    placeholder="Ej: 5"
-                    inputMode="numeric"
-                  />
-                ) : (
-                  <input style={{...s.select, background:'#f0efe9', color:'#888'}} value={nextNum} readOnly />
-                )}
-              </div>
-            </div>
-          </div>
 
-          {/* ── Visualización y Reserva del Hostname ── */}
-          {hostname && (
-            <div style={s.card}>
-              <div style={s.cardTitle}>Hostname generado</div>
-              <div style={s.previewBox}>
-                <div>
-                  <div style={s.previewLabel}>Visual</div>
-                  <div style={s.previewDisplay}>{display}</div>
-                </div>
-                <div>
-                  <div style={s.previewLabel}>Hostname AD</div>
-                  <div style={s.previewFinal}>{hostname}</div>
-                </div>
-                <div style={{display:'flex', flexDirection:'column', gap:6, alignItems:'flex-end'}}>
-                  {!locked
-                    ? <button style={s.btnLock} onClick={handleLock}>🔒 Reservar (3 min)</button>
-                    : <div style={s.timerChip}>⏱ {fmtTime(lockTimer)} reservado</div>
-                  }
-                  {lockMsg && <div style={s.lockWarn}>{lockMsg}</div>}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ── Formulario complementario ── */}
-          <div style={s.card}>
-            <div style={s.cardTitle}>Datos del equipo</div>
-            <div style={s.grid2}>
-              {TIPOS_CON_USUARIO.includes(tipoCode) ? (
-                <>
-                  <div style={s.field}>
-                    <label style={s.label}>Usuario Windows *</label>
-                    <input style={s.input} value={usuario} onChange={e => setUsuario(e.target.value)} placeholder="usuario.apellido" />
-                  </div>
-                  <div style={s.field}>
-                    <label style={s.label}>Técnico asignante</label>
-                    <input style={{...s.input, background:'#f0efe9', color:'#888'}} value={`${user?.nombre} <${user?.email}>`} readOnly />
-                  </div>
-                </>
-              ) : (
                 <div style={s.field}>
-                  <label style={s.label}>Técnico asignante</label>
-                  <input style={{...s.input, background:'#f0efe9', color:'#888'}} value={`${user?.nombre} <${user?.email}>`} readOnly />
+                  <label style={s.label}>Sector / Área</label>
+                  {!TIPOS_SIN_SECTOR_EN_CODIGO.includes(tipoCode) ? (
+                    <select style={s.select} value={sectorId} onChange={e => {
+                      setSectorId(e.target.value);
+                      const obj = sectores.find(sec => String(sec.id) === String(e.target.value));
+                      setSectorCode(obj ? obj.code : '');
+                      if(obj && obj.code === SECTOR_CONSULTORIO) { setNextNum(''); }
+                    }} disabled={!pisoId}>
+                      <option value="">-- Seleccionar --</option>
+                      {sectores.map(sec => <option key={sec.id} value={sec.id}>{sec.name} ({sec.code})</option>)}
+                    </select>
+                  ) : (
+                    <input style={{...s.select, background:'#f0efe9', color:'#999'}} value="No requerido" readOnly />
+                  )}
                 </div>
-              )}
-              <div style={{...s.field, gridColumn:'1/-1'}}>
-                <label style={s.label}>Notas</label>
-                <textarea style={{...s.input, minHeight:60, resize:'vertical'}} value={notas} onChange={e => setNotas(e.target.value)} placeholder="Observaciones opcionales" />
+
+                <div style={s.field}>
+                  <label style={s.label}>
+                    {esConsultorio ? 'Número de consultorio *' : 'Número (auto)'}
+                  </label>
+                  {esConsultorio ? (
+                    <input
+                      style={s.select}
+                      value={nextNum}
+                      onChange={e => setNextNum(e.target.value.replace(/\D/g, ''))}
+                      placeholder="Ej: 05"
+                      inputMode="numeric"
+                    />
+                  ) : (
+                    <input style={{...s.select, background:'#f0efe9', color:'#888'}} value={nextNum} readOnly />
+                  )}
+                </div>
               </div>
             </div>
 
-            {error && <div style={s.errorBox}>{error}</div>}
+            {/* ── Nomenclatura Generada ── */}
+            {hostname && (
+              <div style={s.card}>
+                <div style={s.cardTitle}>Nomenclatura</div>
+                <div style={s.previewBox}>
+                  <div><div style={s.previewLabel}>Impreso</div><div style={s.previewDisplay}>{display}</div></div>
+                  <div><div style={s.previewLabel}>Active Directory</div><div style={s.previewFinal}>{hostname}</div></div>
+                  <div>
+                    {!locked ? <button style={s.btnPrimary} onClick={handleLock}>🔒 Reservar</button> : <div style={s.timerChip}>⏱ {fmtTime(lockTimer)}</div>}
+                  </div>
+                  {lockMsg && <div style={{...s.lockWarn, width:'100%', marginTop:6}}>{lockMsg}</div>}
+                </div>
+              </div>
+            )}
 
-            <div style={{display:'flex', gap:8, marginTop:16}}>
-              <button style={{...s.btnPrimary, opacity: locked ? 1 : .5}} onClick={handleSave} disabled={saving}>
-                {saving ? 'Guardando...' : 'Registrar hostname'}
-              </button>
-              <button style={s.btnGhost} onClick={handleClear}>Limpiar</button>
+            {/* ── Formulario Complementario ── */}
+            <div style={s.card}>
+              <div style={s.cardTitle}>Datos del equipo</div>
+              <div style={s.grid2}>
+                <div style={s.field}>
+                  <label style={s.label}>Usuario Windows {TIPOS_CON_USUARIO.includes(tipoCode) && '*'}</label>
+                  <input 
+                    style={{...s.input, ...(!TIPOS_CON_USUARIO.includes(tipoCode) ? {background:'#f0efe9', color:'#999'} : {})}} 
+                    value={usuario} 
+                    onChange={e => setUsuario(e.target.value)} 
+                    placeholder={TIPOS_CON_USUARIO.includes(tipoCode) ? "usuario.apellido" : "No aplica"} 
+                    disabled={!TIPOS_CON_USUARIO.includes(tipoCode)}
+                  />
+                </div>
+                <div style={s.field}>
+                  <label style={s.label}>Número de serie</label>
+                  <input style={s.input} value={serie} onChange={e => setSerie(e.target.value)} placeholder="Opcional" />
+                </div>
+                <div style={{...s.field, gridColumn:'1/-1'}}>
+                  <label style={s.label}>Notas</label>
+                  <textarea style={{...s.input, minHeight:60, resize:'vertical'}} value={notas} onChange={e => setNotas(e.target.value)} placeholder="Observaciones opcionales" />
+                </div>
+              </div>
+
+              {error && <div style={s.errorBox}>{error}</div>}
+
+              <div style={{display:'flex', gap:8, marginTop:16}}>
+                <button style={{...s.btnPrimary, opacity: locked ? 1 : .5}} onClick={handleSave} disabled={saving}>
+                  {saving ? 'Guardando...' : 'Registrar'}
+                </button>
+                <button style={s.btnGhost} onClick={handleClear}>Limpiar</button>
+              </div>
             </div>
-          </div>
-        </>}
+          </>
+        )}
       </div>
     </div>
   );
 }
 
 const s = {
-  page:       { minHeight:'100vh', background:'#f4f3ef', fontFamily:'Segoe UI,system-ui,sans-serif' },
-  header:     { background:'#fff', borderBottom:'1px solid #dddbd3', padding:'12px 24px', display:'flex', alignItems:'center', justifyContent:'space-between' },
-  pill:       { background:'#1a52be', color:'#fff', fontFamily:'monospace', fontSize:11, fontWeight:700, padding:'2px 8px', borderRadius:4 },
-  htitle:     { fontSize:16, fontWeight:700 },
-  headerRight:{ display:'flex', alignItems:'center', gap:8 },
-  userChip:   { fontSize:12, color:'#585754', background:'#f0efe9', border:'1px solid #dddbd3', padding:'4px 10px', borderRadius:20 },
-  body:       { maxWidth:860, margin:'0 auto', padding:'24px 16px' },
-  card:       { background:'#fff', border:'1px solid #dddbd3', borderRadius:10, padding:20, marginBottom:14 },
-  cardTitle:  { fontSize:11, fontWeight:700, color:'#999', textTransform:'uppercase', letterSpacing:.6, marginBottom:12 },
-  gridSel3:   { display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8 },
-  grid3:      { display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12 },
-  grid2:      { display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 },
-  selBtn:     { border:'1px solid #c8c6bc', borderRadius:6, padding:'8px 4px', textAlign:'center', cursor:'pointer', transition:'all .15s', background:'#fff' },
-  selActive:  { borderColor:'#1a52be', background:'#eaf0ff' },
-  selCode:    { fontFamily:'monospace', fontSize:13, fontWeight:700, color:'#1a52be' },
-  selName:    { fontSize:10, color:'#999', marginTop:2 },
-  field:      { display:'flex', flexDirection:'column', gap:4 },
-  label:      { fontSize:11, fontWeight:700, color:'#585754', textTransform:'uppercase', letterSpacing:.4 },
-  select:     { border:'1px solid #c8c6bc', borderRadius:6, padding:'8px 10px', fontSize:13, outline:'none' },
-  input:      { border:'1px solid #c8c6bc', borderRadius:6, padding:'8px 10px', fontSize:13, outline:'none', fontFamily:'inherit' },
-  previewBox: { display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:12, background:'#f4f3ef', border:'1px solid #dddbd3', borderRadius:6, padding:'14px 16px' },
-  previewLabel:  { fontSize:10, fontWeight:700, color:'#999', textTransform:'uppercase', marginBottom:4 },
-  previewDisplay:{ fontFamily:'monospace', fontSize:18, color:'#444' },
-  previewFinal:  { fontFamily:'monospace', fontSize:22, fontWeight:700, color:'#1a52be' },
-  btnLock:    { background:'#fff', border:'1px solid #c8c6bc', borderRadius:6, padding:'8px 14px', fontSize:12, fontWeight:600, cursor:'pointer' },
-  timerChip:  { background:'#e6f5ec', color:'#1a7a3c', border:'1px solid #9adfc8', borderRadius:20, padding:'6px 14px', fontSize:13, fontWeight:700 },
-  lockWarn:   { fontSize:11, color:'#8a5a00', background:'#fdf3dc', border:'1px solid #f0d090', borderRadius:4, padding:'4px 8px' },
-  btnPrimary: { background:'#1a52be', color:'#fff', border:'none', borderRadius:6, padding:'9px 18px', fontSize:13, fontWeight:600, cursor:'pointer' },
-  btnGhost:   { background:'transparent', color:'#585754', border:'1px solid #c8c6bc', borderRadius:6, padding:'9px 14px', fontSize:13, cursor:'pointer' },
-  errorBox:   { background:'#fceaea', color:'#b83030', border:'1px solid #f0b0b0', borderRadius:6, padding:'8px 12px', fontSize:12, marginTop:10 },
-  savedBox:   { background:'#fff', border:'1px solid #9adfc8', borderRadius:10, padding:28, textAlign:'center', marginBottom:14 },
-  savedTitle: { fontSize:14, fontWeight:600, color:'#1a7a3c', marginBottom:10 },
-  savedHn:    { fontFamily:'monospace', fontSize:28, fontWeight:700, color:'#1a52be' },
-  savedSub:   { fontSize:13, color:'#888', marginTop:4 }
+  page: { minHeight:'100vh', background:'#f4f3ef', fontFamily:'sans-serif' },
+  header: { background:'#fff', borderBottom:'1px solid #dddbd3', padding:'12px 24px', display:'flex', justifyContent:'space-between', alignItems:'center' },
+  pill: { background:'#1a52be', color:'#fff', padding:'2px 8px', borderRadius:4, fontSize:11, fontWeight:700, marginRight:6 },
+  htitle: { fontWeight:700 },
+  userChip: { background:'#f0efe9', padding:'4px 10px', borderRadius:20, fontSize:12, marginRight:8 },
+  body: { maxWidth:860, margin:'0 auto', padding:'24px 16px' },
+  card: { background:'#fff', border:'1px solid #dddbd3', borderRadius:10, padding:20, marginBottom:14 },
+  cardTitle: { fontSize:11, fontWeight:700, color:'#999', textTransform:'uppercase', marginBottom:12 },
+  gridSel3: { display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8 },
+  grid3: { display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12 },
+  grid2: { display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 },
+  selBtn: { border:'1px solid #c8c6bc', borderRadius:6, padding:'8px 4px', textAlign:'center', cursor:'pointer', background:'#fff' },
+  selActive: { borderColor:'#1a52be', background:'#eaf0ff' },
+  selCode: { fontWeight:700, color:'#1a52be', fontFamily:'monospace' },
+  selName: { fontSize:10, color:'#999' },
+  field: { display:'flex', flexDirection:'column', gap:4 },
+  label: { fontSize:11, fontWeight:700, color:'#585754' },
+  select: { border:'1px solid #c8c6bc', borderRadius:6, padding:'8px 10px', fontSize:13, outline:'none' },
+  input: { border:'1px solid #c8c6bc', borderRadius:6, padding:'8px 10px', fontSize:13, outline:'none' },
+  previewBox: { display:'flex', justifyContent:'space-between', alignItems:'center', background:'#f4f3ef', padding:16, borderRadius:6, flexWrap:'wrap' },
+  previewLabel: { fontSize:10, color:'#999', textTransform:'uppercase' },
+  previewDisplay: { fontSize:16, color:'#555', fontFamily:'monospace' },
+  previewFinal: { fontSize:20, fontWeight:700, color:'#1a52be', fontFamily:'monospace' },
+  timerChip: { background:'#e6f5ec', color:'#1a7a3c', padding:'6px 12px', borderRadius:20, fontWeight:700 },
+  lockWarn: { fontSize:11, color:'#8a5a00', background:'#fdf3dc', border:'1px solid #f0d090', borderRadius:4, padding:'4px 8px' },
+  btnPrimary: { background:'#1a52be', color:'#fff', border:'none', borderRadius:6, padding:'9px 18px', fontWeight:600, cursor:'pointer' },
+btnGhost:   { background:'#f8f9fa', color:'#1a52be', border:'1px solid #1a52be', borderRadius:6, padding:'8px 14px', fontSize:13, fontWeight:600, cursor:'pointer', marginRight:4 },  errorBox: { background:'#fceaea', color:'#b83030', padding:10, borderRadius:6, marginTop:10, fontSize:13 },
+  savedBox: { background:'#fff', border:'1px solid #9adfc8', borderRadius:10, padding:30, textAlign:'center' },
+  savedTitle: { color:'#1a7a3c', fontWeight:600, marginBottom:10 },
+  savedHn: { fontSize:26, fontWeight:700, color:'#1a52be', marginBottom:12, fontFamily:'monospace' }
 };
+
+
