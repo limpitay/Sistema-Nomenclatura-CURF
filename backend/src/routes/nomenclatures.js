@@ -2,6 +2,7 @@ const express = require('express');
 const db = require('../db');
 const redis = require('../redis');
 const auth = require('../middleware/auth');
+const { nextAvailableNumber } = require('../utils/nextNumber');
 
 const router = express.Router();
 const LOCK_TTL = 180; // segundos — 3 minutos
@@ -180,8 +181,7 @@ router.get('/next', auth, async (req, res) => {
     const result = await db.query(query, params);
 
     const usedNums = result.rows.map(r => r.sequential_number);
-    let next = 1;
-    while (usedNums.includes(next)) next++;
+    const next = nextAvailableNumber(usedNums);
 
     res.json({ next: String(next).padStart(2, '0') });
   } catch (err) {

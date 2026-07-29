@@ -10,7 +10,7 @@ Sistema centralizado para la gestión y asignación de nomenclatures de equipos,
 |---|---|
 | **React + Vite** | Frontend |
 | **Node.js + Express** | API REST |
-| **PostgreSQL 16** | Base de datos principal |
+| **PostgreSQL 15** | Base de datos principal |
 | **Redis 7** | Locks temporales (3 minutos) |
 | **Docker Compose** | Orquestación de servicios |
 | **Nginx** | Proxy reverso + servir frontend |
@@ -35,43 +35,42 @@ Tu PC Windows (desarrollo)           Ubuntu Server 24 VM
 ## 📁 Estructura del proyecto
 
 ```
-curf-nomenclatura/
-├── docker-compose.yml           ← producción (server)
-├── docker-compose.dev.yml       ← desarrollo (tu PC)
+Sistema-Nomenclatura-CURF/
+├── docker-compose.yml
+├── Dockerfile.backend
+├── Dockerfile.frontend
+├── nginx.conf
+├── .env.example
 │
 ├── backend/
-│   ├── Dockerfile
 │   ├── package.json
-│   ├── .env.example
 │   └── src/
 │       ├── index.js
 │       ├── db.js                ← pool PostgreSQL
 │       ├── redis.js             ← cliente Redis (locks)
 │       ├── routes/
-│       │   ├── auth.js          ← login / logout / session
-│       │   ├── nomenclatures.js     ← GET / POST / PATCH / lock
-│       │   └── users.js         ← CRUD usuarios (admin)
+│       │   ├── auth.js          ← login / me
+│       │   └── nomenclatures.js ← catálogos / GET / POST / PATCH / lock / events
 │       └── middleware/
-│           ├── auth.js          ← verificar JWT
-│           └── lock.js          ← verificar/adquirir lock Redis
+│           └── auth.js          ← verificar JWT
 │
 ├── frontend/
-│   ├── Dockerfile
-│   ├── nginx.conf
 │   ├── package.json
+│   ├── vite.config.js
 │   └── src/
 │       ├── main.jsx
-│       ├── App.jsx
-│       ├── api/                 ← fetch wrapper con JWT
-│       ├── pages/
-│       │   ├── Login.jsx
-│       │   ├── Builder.jsx      ← formulario de alta de hostname
-│       │   └── History.jsx
-│       └── components/
-│           └── LockTimer.jsx    ← cuenta regresiva visible
+│       ├── App.jsx              ← router
+│       ├── api/client.js        ← wrapper Axios con JWT
+│       ├── context/AuthContext.jsx
+│       └── pages/
+│           ├── Login.jsx
+│           ├── Builder.jsx      ← formulario de alta de hostname
+│           ├── History.jsx      ← listado + historial de eventos
+│           └── Admin.jsx        ← placeholder, sin implementar aún
 │
-└── db/
-    └── init.sql                 ← schema + datos iniciales
+└── docker/
+    └── db/
+        └── init.sql             ← schema + datos iniciales
 ```
 
 ---
@@ -118,45 +117,47 @@ PG: INSERT INTO nomenclatures ...
 
 ## 🗄️ Esquema de base de datos
 
+Catálogos: `buildings`, `floors` (FK a `buildings`), `sectors`, `device_types` y
+`nomenclature_states` (los 6 estados posibles: generated, assigned, active,
+withdrawn, decommissioned, reassigned — aunque hoy la API solo expone las
+transiciones generado/reasignado/baja).
+
 ### `users`
 | Campo | Tipo | Descripción |
 |---|---|---|
 | id | SERIAL PK | Identificador único |
-| nombre | VARCHAR(100) | Nombre del técnico |
-| email | VARCHAR(150) UNIQUE | Email de acceso |
-| password_hash | TEXT | Hash de contraseña |
-| rol | VARCHAR(20) | `tecnico` o `admin` |
+| nombre | VARCHAR(255) | Nombre del técnico |
+| email | VARCHAR(255) UNIQUE | Email de acceso |
+| password | VARCHAR(255) | Hash bcrypt de la contraseña |
+| rol | VARCHAR(50) | `technician` (default) o `admin` |
 | activo | BOOLEAN | Estado de la cuenta |
-| created_at | TIMESTAMPTZ | Fecha de creación |
+| created_at | TIMESTAMP | Fecha de creación |
 
 ### `nomenclatures`
 | Campo | Tipo | Descripción |
 |---|---|---|
 | id | SERIAL PK | Identificador único |
-| hostname | VARCHAR(20) UNIQUE | Ej: `JRP1ADMPC04` |
-| hostname_display | VARCHAR(30) | Ej: `JR-P1-ADM-PC04` |
-| tipo | VARCHAR(10) | PC, NB, IMP, etc. |
-| edificio | VARCHAR(5) | Código de edificio |
-| piso | VARCHAR(5) | Código de piso |
-| sector | VARCHAR(10) | Sector del edificio |
-| usuario_windows | VARCHAR(100) | Usuario asignado |
-| numero_serie | VARCHAR(100) | N° de serie del equipo |
-| estado | VARCHAR(20) | `activo`, `baja`, etc. |
-| notas | TEXT | Observaciones |
-| tecnico_id | INT FK → users | Técnico que lo creó |
-| created_at | TIMESTAMPTZ | Fecha de alta |
-| updated_at | TIMESTAMPTZ | Última modificación |
+| generated_code | VARCHAR(50) UNIQUE | Hostname final, ej: `JRP1ADMPC04` |
+| building_id | INT FK → buildings | Edificio |
+| device_type_id | INT FK → device_types | Tipo de dispositivo |
+| sector_id | INT FK → sectors, nullable | Sector (TT/LL/CAM/FID no lo usan) |
+| sequential_number | INTEGER | Número secuencial dentro de su grupo |
+| state_id | INT FK → nomenclature_states | Estado actual |
+| created_by | INT FK → users | Técnico que lo creó |
+| created_at / updated_at | TIMESTAMP | Fechas de alta / última modificación |
 
-### `events`
-| Campo | Tipo | Descripción |
-|---|---|---|
-| id | SERIAL PK | Identificador único |
-| hostname_id | INT FK → nomenclatures | Hostname relacionado |
-| hostname | VARCHAR(20) | Copia del nombre |
-| accion | VARCHAR(50) | Tipo de evento |
-| detalle | TEXT | Descripción |
-| tecnico_id | INT FK → users | Técnico responsable |
-| created_at | TIMESTAMPTZ | Fecha del evento |
+### `nomenclature_history`
+Historial de negocio (qué se ve en el modal de detalle de `History.jsx`): cada
+cambio de estado de una nomenclatura, con motivo, técnico y fecha.
+
+### `audit_log`
+Auditoría técnica de bajo nivel (creación, cambios de estado) con detalle en
+JSONB — pensada para trazabilidad, no para mostrarse directamente en la UI.
+
+> Nota: `current_assignments`, `reuse_log` y `events` se sacaron del schema
+> porque ningún endpoint las usaba. Si en el futuro se necesita reciclar
+> números de equipos dados de baja, `reuse_log` es el punto de partida lógico
+> para reintroducir (hoy `GET /nomenclatures/next` nunca reutiliza números).
 
 ---
 
@@ -167,28 +168,40 @@ git clone https://github.com/limpitay/Sistema-Nomenclatura-CURF.git
 cd Sistema-Nomenclatura-CURF
 
 # Configurar variables de entorno
-cp backend/.env.example backend/.env
+cp .env.example .env
+# completar .env con los valores reales (DB, Redis, JWT_SECRET, etc.)
 
-# Levantar en modo desarrollo
-docker-compose -f docker-compose.dev.yml up --build
+# Levantar todos los servicios
+docker-compose up --build
 ```
+
+Frontend en `http://localhost:8080`, API en `http://localhost:3001`, pgAdmin
+en `http://localhost:5050`.
 
 ---
 
 ## 🔌 Endpoints principales
 
-| Método | Ruta | Descripción |
-|---|---|---|
-| POST | `/api/auth/login` | Iniciar sesión |
-| GET | `/api/auth/session` | Verificar sesión activa |
-| POST | `/api/auth/logout` | Cerrar sesión |
-| GET | `/api/nomenclatures/next` | Próximo número disponible |
-| POST | `/api/nomenclatures/lock` | Reservar hostname (3 min) |
-| GET | `/api/nomenclatures/` | Listar nomenclatures |
-| POST | `/api/nomenclatures/` | Crear hostname |
-| PATCH | `/api/nomenclatures/:id` | Actualizar hostname |
-| GET | `/api/users/` | Listar usuarios (admin) |
-| POST | `/api/users/` | Crear usuario (admin) |
+| Método | Ruta | Auth | Descripción |
+|---|---|---|---|
+| POST | `/api/auth/login` | — | Iniciar sesión (máx. 10 intentos / 15 min por IP) |
+| GET | `/api/auth/me` | JWT | Datos del usuario autenticado |
+| GET | `/api/nomenclatures/catalogs/buildings` | — | Listar edificios |
+| GET | `/api/nomenclatures/catalogs/device-types` | — | Listar tipos de dispositivo |
+| GET | `/api/nomenclatures/catalogs/floors/:buildingId` | — | Pisos de un edificio |
+| GET | `/api/nomenclatures/catalogs/sectors` | — | Listar sectores |
+| GET | `/api/nomenclatures` | JWT | Listar nomenclaturas (filtros: tipo, edificio, estado, search) |
+| POST | `/api/nomenclatures` | JWT | Crear hostname |
+| GET | `/api/nomenclatures/next` | JWT | Próximo número secuencial disponible |
+| POST | `/api/nomenclatures/lock` | JWT | Reservar hostname (3 min, Redis) |
+| DELETE | `/api/nomenclatures/lock/:hostname` | JWT | Liberar reserva manualmente |
+| PATCH | `/api/nomenclatures/:id` | JWT | Cambiar estado (reasignado / baja) |
+| GET | `/api/nomenclatures/:hostname/events` | JWT | Historial de estados de una nomenclatura |
+| GET | `/api/health` | — | Health check |
+
+No hay endpoint de logout: el logout es solo del lado del cliente (se borra el
+token de `localStorage`), y el JWT expira solo según `JWT_EXPIRES`. Tampoco
+existe todavía un módulo de administración de usuarios vía API.
 
 ---
 

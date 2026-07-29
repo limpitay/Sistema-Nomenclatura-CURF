@@ -37,7 +37,7 @@ CREATE TABLE floors (
 
 -- Building JR (Jacinto Ríos, id 1): Subsuelo -> 8vo piso   -> floor_id 1-10
 -- Building ON (Oncativo, id 2): Subsuelo -> 4to piso        -> floor_id 11-16
--- Building AU (Audiología, id 3): solo Planta Baja          -> floor_id 17
+-- Building CA (Audiología, id 3): solo Planta Baja          -> floor_id 17
 -- Building SU (Suipacha, id 4): Planta Baja y 1er piso      -> floor_id 18-19
 -- Building JK (Jockey, id 5): solo Piso 1                   -> floor_id 20
 -- Building LI (Libertad/Odontología UCC, id 6): solo PB     -> floor_id 21
@@ -74,7 +74,6 @@ CREATE TABLE sectors (
 );
 
 INSERT INTO sectors (code, name, description) VALUES
-INSERT INTO sectors (code, name, description) VALUES
 ('ADM', 'Administración', 'Oficinas administrativas'),
 ('DIR', 'Dirección', 'Oficina de dirección'),
 ('ENF', 'Enfermería', 'Sala de enfermería'),
@@ -102,7 +101,7 @@ INSERT INTO sectors (code, name, description) VALUES
 ('UTA', 'UTI Adultos', 'Unidad de Terapia Intensiva Adultos'),
 ('UTP', 'UTI Pediátrica', 'Unidad de Terapia Intensiva Pediátrica'),
 ('QUI', 'Quirófano', 'Área de quirófano'),
-('DXI', 'Diagnóstico por Imágenes', 'Área de Imagenes'),
+('DXI', 'Diagnóstico por Imágenes', 'Área de Imagenes');
 
 -- 4. DEVICE_TYPES
 CREATE TABLE device_types (
@@ -191,28 +190,7 @@ CREATE INDEX idx_nomenclature_history_nomenclature ON nomenclature_history(nomen
 CREATE INDEX idx_nomenclature_history_changed_at ON nomenclature_history(changed_at);
 CREATE INDEX idx_nomenclature_history_state ON nomenclature_history(state_id);
 
--- 9. CURRENT_ASSIGNMENTS
-CREATE TABLE current_assignments (
-  nomenclature_id INTEGER PRIMARY KEY REFERENCES nomenclatures(id) ON DELETE CASCADE,
-  assigned_to INTEGER REFERENCES users(id) ON DELETE SET NULL,
-  assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  is_current BOOLEAN DEFAULT TRUE
-);
-
-CREATE INDEX idx_current_assignments_assigned_to ON current_assignments(assigned_to);
-
--- 10. REUSE_LOG
-CREATE TABLE reuse_log (
-  id SERIAL PRIMARY KEY,
-  nomenclature_id INTEGER NOT NULL REFERENCES nomenclatures(id) ON DELETE CASCADE,
-  reused_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  reason VARCHAR(500)
-);
-
-CREATE INDEX idx_reuse_log_nomenclature ON reuse_log(nomenclature_id);
-CREATE INDEX idx_reuse_log_reused_at ON reuse_log(reused_at);
-
--- 11. AUDIT_LOG
+-- 9. AUDIT_LOG
 CREATE TABLE audit_log (
   id SERIAL PRIMARY KEY,
   nomenclature_id INTEGER REFERENCES nomenclatures(id) ON DELETE SET NULL,
@@ -225,17 +203,3 @@ CREATE TABLE audit_log (
 CREATE INDEX idx_audit_log_nomenclature ON audit_log(nomenclature_id);
 CREATE INDEX idx_audit_log_timestamp ON audit_log(timestamp);
 CREATE INDEX idx_audit_log_action ON audit_log(action_type);
-
--- 12. EVENTS (for legacy compatibility)
-CREATE TABLE events (
-  id SERIAL PRIMARY KEY,
-  hostname_id INTEGER,
-  hostname VARCHAR(255),
-  accion VARCHAR(100),
-  detalle TEXT,
-  tecnico_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX idx_events_hostname ON events(hostname);
-CREATE INDEX idx_events_created_at ON events(created_at);

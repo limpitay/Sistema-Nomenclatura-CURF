@@ -4,7 +4,10 @@ const cors    = require('cors');
 
 const app = express();
 
-app.use(cors());
+// CORS_ORIGIN: lista de orígenes separados por coma (ej: "http://localhost:5173,http://192.168.1.50:8080")
+// Si no está seteada, queda abierto a cualquier origen (comportamiento previo).
+const corsOrigin = process.env.CORS_ORIGIN;
+app.use(cors(corsOrigin ? { origin: corsOrigin.split(',').map(o => o.trim()) } : undefined));
 app.use(express.json());
 
 // Rutas

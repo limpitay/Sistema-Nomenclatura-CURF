@@ -12,6 +12,9 @@ const ESTADOS_ALL = [
 ];
 const ESTADOS = ['todos', ...ESTADOS_ALL.map(e => e.key)];
 const STATE_BADGE = Object.fromEntries(ESTADOS_ALL.map(e => [e.db, e]));
+// Para estados que existen en nomenclature_states pero no tienen badge propio
+// (assigned, active, withdrawn) — evita romper el render si aparecen.
+const DEFAULT_BADGE = { bg:'#f0efe9', color:'#888' };
 
 export default function History() {
   const { user, logout } = useAuth();
@@ -83,12 +86,13 @@ export default function History() {
   });
 
   const estadoBadge = (stateName) => {
-    const st = STATE_BADGE[stateName] || STATE_BADGE.withdrawn;
+    const st = STATE_BADGE[stateName] || DEFAULT_BADGE;
+    const label = STATE_BADGE[stateName]?.label || stateName || '—';
     return (
       <span style={{ background:st.bg, color:st.color,
         fontSize:11, fontWeight:700, padding:'2px 8px',
         borderRadius:10 }}>
-        {st.label}
+        {label}
       </span>
     );
   };
@@ -205,7 +209,7 @@ export default function History() {
                 ['Sector',    selected.sector_name || '—'],
                 ['N° secuencial', selected.sequential_number],
                 ['Técnico',   selected.creador_nombre || '—'],
-                ['Estado',    (STATE_BADGE[selected.state_name] || STATE_BADGE.withdrawn).label],
+                ['Estado',    STATE_BADGE[selected.state_name]?.label || selected.state_name || '—'],
               ].map(([k, v]) => (
                 <div key={k} style={s.infoItem}>
                   <div style={s.infoLabel}>{k}</div>
