@@ -1,0 +1,94 @@
+# Compose de producción. Diferencias clave respecto a docker-compose.yml:
+# - Sin pgAdmin ni contenedor "dev" (herramientas de desarrollo).
+# - Postgres y Redis no publican puertos al host (solo accesibles dentro de la red de Docker).
+# - Redis requiere password (REDIS_PASSWORD es obligatoria, sin default).
+# - api corre con NODE_ENV=production y sin bind-mounts (usa el código de la imagen).
+# - No se monta seed-dev.sql: la base arranca solo con catálogos, sin usuarios de test.
+#
+# Uso:
+#   cp .env.example .env   # completar con valores reales de producción
+#   docker compose -f docker-compose.prod.yml up --build -d
+#   docker compose -f docker-compose.prod.yml exec api npm run create-user -- "Nombre" email@dominio.com password admin
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: sistema-nomenclatura-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/db/init.sql:/docker-entrypoint-initdb.d/1-init.sql
+    networks:
+      - sistema-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: sistema-nomenclatura-redis
+    restart: unless-stopped
+    command: redis-server --requirepass "${REDIS_PASSWORD}"
+    volumes:
+      - redis_data:/data
+    networks:
+      - sistema-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "--no-auth-warning", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: sistema-nomenclatura-api
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - sistema-network
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3001/api/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: sistema-nomenclatura-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - api
+    networks:
+      - sistema-network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  sistema-network:
+    driver: bridge

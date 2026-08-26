@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
 import client from '../api/client';
+import Layout from '../components/Layout';
 
 // Los 6 estados reales de nomenclature_states, con su clave en español
 // (la misma que espera el backend en ESTADO_TO_STATE) y su nombre en inglés (DB)
@@ -17,9 +16,6 @@ const STATE_BADGE = Object.fromEntries(ESTADOS_ALL.map(e => [e.db, e]));
 const DEFAULT_BADGE = { bg:'#f0efe9', color:'#888' };
 
 export default function History() {
-  const { user, logout } = useAuth();
-  const navigate = useNavigate();
-
   const [nomenclatures, setnomenclatures] = useState([]);
   const [loading,   setLoading]   = useState(true);
   const [search,    setSearch]    = useState('');
@@ -98,21 +94,7 @@ export default function History() {
   };
 
   return (
-    <div style={s.page}>
-
-      {/* ── Header ── */}
-      <div style={s.header}>
-        <div>
-          <span style={s.pill}>CURF</span>
-          <span style={s.htitle}> Sistema de Nomenclatura</span>
-        </div>
-        <div style={s.headerRight}>
-          <span style={s.userChip}>👤 {user?.nombre}</span>
-          <button style={s.btnGhost} onClick={() => navigate('/')}>Constructor</button>
-          <button onClick={logout}>Salir</button>
-        </div>
-      </div>
-
+    <Layout>
       <div style={s.body}>
 
         {/* ── Filtros ── */}
@@ -268,23 +250,17 @@ export default function History() {
         </div>
       )}
 
-    </div>
+    </Layout>
   );
 }
 
 const s = {
-  page:       { minHeight:'100vh', background:'#f4f3ef', fontFamily:'Segoe UI,system-ui,sans-serif' },
-  header:     { background:'#fff', borderBottom:'1px solid #dddbd3', padding:'12px 24px', display:'flex', alignItems:'center', justifyContent:'space-between' },
-  pill:       { background:'#1a52be', color:'#fff', fontFamily:'monospace', fontSize:11, fontWeight:700, padding:'2px 8px', borderRadius:4 },
-  htitle:     { fontSize:16, fontWeight:700 },
-  headerRight:{ display:'flex', alignItems:'center', gap:8 },
-  userChip:   { fontSize:12, color:'#585754', background:'#f0efe9', border:'1px solid #dddbd3', padding:'4px 10px', borderRadius:20 },
   body:       { maxWidth:1100, margin:'0 auto', padding:'24px 16px' },
   card:       { background:'#fff', border:'1px solid #dddbd3', borderRadius:10, padding:20, marginBottom:14 },
   filterRow:  { display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:12 },
   searchForm: { display:'flex', gap:8, flex:1 },
-  searchInput:{ flex:1, border:'1px solid #c8c6bc', borderRadius:6, padding:'8px 12px', fontSize:13, outline:'none' },
-  input:      { border:'1px solid #c8c6bc', borderRadius:6, padding:'8px 10px', fontSize:13, outline:'none', fontFamily:'inherit', background:'#fff' },
+  searchInput:{ flex:1, border:'1px solid #c8c6bc', borderRadius:6, padding:'8px 12px', fontSize:13, outline:'none', background:'#fff', color:'#1a1a18' },
+  input:      { border:'1px solid #c8c6bc', borderRadius:6, padding:'8px 10px', fontSize:13, outline:'none', fontFamily:'inherit', background:'#fff', color:'#1a1a18' },
   estadoTabs: { display:'flex', gap:4, flexWrap:'wrap' },
   estadoTab:  { border:'1px solid #c8c6bc', borderRadius:20, padding:'5px 12px', fontSize:12, fontWeight:600, cursor:'pointer', background:'#fff', color:'#585754' },
   estadoActive:{ background:'#1a52be', color:'#fff', borderColor:'#1a52be' },

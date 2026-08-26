@@ -1,13 +1,9 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
 import client from '../api/client';
+import Layout from '../components/Layout';
 import { TIPOS_CON_USUARIO, TIPOS_SIN_SECTOR_EN_CODIGO, SECTOR_CONSULTORIO, buildHostname } from '../utils/hostname';
 
 export default function Builder() {
-  const { user, logout } = useAuth();
-  const navigate = useNavigate();
-
   // Estados para almacenar los catálogos dinámicos desde la Base de Datos
   const [edificios, setEdificios] = useState([]);
   const [tipos, setTipos] = useState([]);
@@ -169,20 +165,7 @@ export default function Builder() {
   const fmtTime = s => `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`;
 
   return (
-    <div style={s.page}>
-      {/* ── Header Corregido ── */}
-      <div style={s.header}>
-        <div>
-          <span style={s.pill}>CURF</span>
-          <span style={s.htitle}> Sistema de Nomenclatura</span>
-        </div>
-        <div style={s.headerRight}>
-          <span style={s.userChip}>👤 {user?.nombre}</span>
-          <button style={s.btnGhost} onClick={() => navigate('/historial')}>Historial</button>
-          <button style={s.btnGhost} onClick={logout}>Salir</button>
-        </div>
-      </div>
-
+    <Layout>
       <div style={s.body}>
         {saved ? (
           <div style={s.savedBox}>
@@ -326,16 +309,11 @@ export default function Builder() {
           </>
         )}
       </div>
-    </div>
+    </Layout>
   );
 }
 
 const s = {
-  page: { minHeight:'100vh', background:'#f4f3ef', fontFamily:'sans-serif' },
-  header: { background:'#fff', borderBottom:'1px solid #dddbd3', padding:'12px 24px', display:'flex', justifyContent:'space-between', alignItems:'center' },
-  pill: { background:'#1a52be', color:'#fff', padding:'2px 8px', borderRadius:4, fontSize:11, fontWeight:700, marginRight:6 },
-  htitle: { fontWeight:700 },
-  userChip: { background:'#f0efe9', padding:'4px 10px', borderRadius:20, fontSize:12, marginRight:8 },
   body: { maxWidth:860, margin:'0 auto', padding:'24px 16px' },
   card: { background:'#fff', border:'1px solid #dddbd3', borderRadius:10, padding:20, marginBottom:14 },
   cardTitle: { fontSize:11, fontWeight:700, color:'#999', textTransform:'uppercase', marginBottom:12 },
@@ -348,8 +326,8 @@ const s = {
   selName: { fontSize:10, color:'#999' },
   field: { display:'flex', flexDirection:'column', gap:4 },
   label: { fontSize:11, fontWeight:700, color:'#585754' },
-  select: { border:'1px solid #c8c6bc', borderRadius:6, padding:'8px 10px', fontSize:13, outline:'none' },
-  input: { border:'1px solid #c8c6bc', borderRadius:6, padding:'8px 10px', fontSize:13, outline:'none' },
+  select: { border:'1px solid #c8c6bc', borderRadius:6, padding:'8px 10px', fontSize:13, outline:'none', background:'#fff', color:'#1a1a18' },
+  input: { border:'1px solid #c8c6bc', borderRadius:6, padding:'8px 10px', fontSize:13, outline:'none', background:'#fff', color:'#1a1a18' },
   previewBox: { display:'flex', justifyContent:'space-between', alignItems:'center', background:'#f4f3ef', padding:16, borderRadius:6, flexWrap:'wrap' },
   previewLabel: { fontSize:10, color:'#999', textTransform:'uppercase' },
   previewDisplay: { fontSize:16, color:'#555', fontFamily:'monospace' },

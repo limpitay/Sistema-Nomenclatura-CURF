@@ -93,6 +93,7 @@ const styles = {
   input: {
     border: '1px solid #c8c6bc', borderRadius: 6,
     padding: '9px 12px', fontSize: 13, outline: 'none',
+    background: '#fff', color: '#1a1a18',
   },
   error: {
     background: '#fceaea', color: '#b83030',

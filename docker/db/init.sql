@@ -138,6 +138,8 @@ INSERT INTO nomenclature_states (state, description, is_active) VALUES
 ('reassigned', 'Code recycled for new device/location', TRUE);
 
 -- 6. USERS (Movido arriba de nomenclatures para permitir la FK)
+-- Sin datos de prueba: los usuarios reales se cargan con backend/scripts/create-user.js
+-- (para desarrollo local, docker/db/seed-dev.sql agrega usuarios de test)
 CREATE TABLE users (
   id SERIAL PRIMARY KEY,
   nombre VARCHAR(255) NOT NULL,
@@ -147,20 +149,6 @@ CREATE TABLE users (
   activo BOOLEAN DEFAULT TRUE,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-
-INSERT INTO users (nombre, email, password, rol)
-VALUES (
-  'Luis Limpitay',
-  'test@curf.com',
-  '$2b$10$EkxnMyy0IB8exaG/yqwuJOs3NWN6S1x0erVuFPRvHaWvZMuZM08Um',
-  'admin'),
-  ('Diego Vega', 'dvega@curf.com', '$2b$10$f5grr.JXViIsRnhqB2tOPeHeylYVmZSABnuA5x1K0hlmBCZYo8Tc6', 'technician'),
-  ('Santiago Fernandez', 'sfernandez@curf.com', '$2b$10$nrobeeO3C48q7UgouadKUebp67eFXggZ2bAaiVXoikFspTvWL2EL.', 'technician'),
-  ('Rodrigo Ziade', 'rziade@curf.com', '$2b$10$ZvTrNas1w6fCby5pFA5fhOZlNaqc18omBByOlC/SOse4yQTrJw312', 'technician'),
-  ('Marcos Moran', 'mmoran@curf.com', '$2b$10$dKjJFeMsh4c.YiON.UlrlemG36tZCYda7xYbnwTgDvFmMBGALTvzO', 'technician'),
-  ('Ignacio Aguada', 'iaguada@curf.com', '$2b$10$XYlhLoJp0k7N6o9dOG9hc.5Asa8WUHJ9aVhH1SuXDxbP10G4vpeuS', 'technician'),
-  ('Lautaro Cordoba', 'lcordoba@curf.com', '$2b$10$HJsnXSD/xCxe6PzUuexdL.R3rMI5h1ud7OGPODCQg/JPVUVuXX62S', 'technician'),
-  ('Matias Martinez', 'mmartinez@curf.com', '$2b$10$tOFzRZY7IHCu4SvFmmX08.HM4KiZ0VC0PTinrhIHL//X4C/WHudCO', 'technician');
 
 -- 7. NOMENCLATURES
 CREATE TABLE nomenclatures (
