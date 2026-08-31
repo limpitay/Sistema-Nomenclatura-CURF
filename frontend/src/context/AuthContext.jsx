@@ -1,15 +1,16 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import client from '../api/client';
-
-const AuthContext = createContext(null);
+import { AuthContext } from './authContextInstance';
 
 export function AuthProvider({ children }) {
   const [user,    setUser]    = useState(null);
-  const [loading, setLoading] = useState(true);
+  // Solo hay algo que esperar si ya existe un token guardado; si no, arranca
+  // sin loading (evita tener que "apagarlo" sincrónicamente dentro del efecto).
+  const [loading, setLoading] = useState(() => !!localStorage.getItem('token'));
 
   useEffect(() => {
     const token = localStorage.getItem('token');
-    if (!token) { setLoading(false); return; }
+    if (!token) return;
 
     client.get('/auth/me')
       .then(res => setUser(res.data.user))
@@ -35,5 +36,3 @@ export function AuthProvider({ children }) {
     </AuthContext.Provider>
   );
 }
-
-export const useAuth = () => useContext(AuthContext);

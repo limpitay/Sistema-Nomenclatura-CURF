@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import client from '../api/client';
 import Layout from '../components/Layout';
 
@@ -26,7 +26,7 @@ export default function History() {
   const [loadingEv, setLoadingEv] = useState(false);
 
   // ── Cargar nomenclatures ───────────────────────────────────
-  const fetchnomenclatures = async () => {
+  const fetchnomenclatures = useCallback(async () => {
     setLoading(true);
     try {
       const params = {};
@@ -39,8 +39,12 @@ export default function History() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [estado, search]);
 
+  // No incluimos 'fetchnomenclatures' en las deps a propósito: cambia de
+  // identidad con 'search', y este efecto solo debe refetchear al cambiar de
+  // pestaña de estado (la búsqueda por texto es manual, vía el botón Buscar).
+  // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
   useEffect(() => { fetchnomenclatures(); }, [estado]);
 
   const handleSearch = (e) => {
@@ -188,10 +192,14 @@ export default function History() {
               {[
                 ['Tipo',      selected.device_type_name || '—'],
                 ['Edificio',  selected.building_name || '—'],
+                ['Piso',      selected.floor_name || '—'],
                 ['Sector',    selected.sector_name || '—'],
                 ['N° secuencial', selected.sequential_number],
+                ['Usuario Windows', selected.usuario_windows || '—'],
+                ['N° de serie', selected.numero_serie || '—'],
                 ['Técnico',   selected.creador_nombre || '—'],
                 ['Estado',    STATE_BADGE[selected.state_name]?.label || selected.state_name || '—'],
+                ['Notas',     selected.notas || '—'],
               ].map(([k, v]) => (
                 <div key={k} style={s.infoItem}>
                   <div style={s.infoLabel}>{k}</div>

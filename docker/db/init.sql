@@ -157,9 +157,13 @@ CREATE TABLE nomenclatures (
   building_id INTEGER NOT NULL REFERENCES buildings(id),
   device_type_id INTEGER NOT NULL REFERENCES device_types(id),
   sector_id INTEGER REFERENCES sectors(id), -- Nullable: TT, LL, CAM no usan Sector
+  floor_id INTEGER REFERENCES floors(id),
   sequential_number INTEGER NOT NULL,
   state_id INTEGER NOT NULL DEFAULT 1 REFERENCES nomenclature_states(id),
   created_by INTEGER REFERENCES users(id) ON DELETE SET NULL, -- Campo agregado
+  usuario_windows VARCHAR(100), -- Solo aplica a PC/NB (ver TIPOS_CON_USUARIO en frontend)
+  numero_serie VARCHAR(100),
+  notas TEXT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -169,6 +173,7 @@ CREATE INDEX idx_nomenclatures_building ON nomenclatures(building_id);
 CREATE INDEX idx_nomenclatures_code ON nomenclatures(generated_code);
 CREATE INDEX idx_nomenclatures_device ON nomenclatures(device_type_id);
 CREATE INDEX idx_nomenclatures_created_by ON nomenclatures(created_by); -- Index agregado para optimizar búsquedas por creador
+CREATE INDEX idx_nomenclatures_floor ON nomenclatures(floor_id);
 
 -- 8. NOMENCLATURE_HISTORY
 CREATE TABLE nomenclature_history (

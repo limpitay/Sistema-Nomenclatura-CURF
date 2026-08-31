@@ -28,8 +28,6 @@ export default function Builder() {
   const [serie, setSerie] = useState('');
   const [notas, setNotas] = useState('');
 
-  const [hostname, setHostname] = useState('');
-  const [display, setDisplay] = useState('');
   const [lockTimer, setLockTimer] = useState(0);
   const [locked, setLocked] = useState(false);
   const [lockMsg, setLockMsg] = useState('');
@@ -57,54 +55,48 @@ export default function Builder() {
   }, []);
 
   // ── 2. Carga dinámica de Pisos filtrados por el Edificio seleccionado ──────
+  // (el reseteo de piso al cambiar/limpiar edificio vive en esos handlers,
+  // no acá — este efecto solo sincroniza con el catálogo del backend)
   useEffect(() => {
-    if (!edifId) {
-      setPisos([]);
-      setPisoId('');
-      setPisoCode('');
-      return;
-    }
+    if (!edifId) return;
     client.get(`/nomenclatures/catalogs/floors/${edifId}`)
       .then(res => setPisos(res.data))
       .catch(err => console.error('Error al traer pisos dependientes:', err));
   }, [edifId]);
 
   // ── 4. Consulta del Próximo Número Secuencial ──────
+  // (el reseteo a '' al cambiar edificio/tipo/sector vive en esos handlers;
+  // este efecto solo dispara el fetch del backend cuando la combinación ya
+  // está completa)
   useEffect(() => {
-    // Si es consultorio, el número se escribe a mano, no le pedimos nada al backend
-    if (esConsultorio) { 
-      return; 
-    }
+    if (esConsultorio) return; // el número se escribe a mano, no se pide al backend
+    if (!edifId || !tipoId) return;
+    if (esComputadora && !sectorId) return;
 
-    if (!edifId || !tipoId) { setNextNum(''); return; }
-    if (esComputadora && !sectorId) { setNextNum(''); return; }
-
-    client.get('/nomenclatures/next', { 
-      params: { tipo: tipoId, edificio: edifId, sector: esComputadora ? sectorId : undefined } 
+    client.get('/nomenclatures/next', {
+      params: { tipo: tipoId, edificio: edifId, sector: esComputadora ? sectorId : undefined }
     })
       .then(res => setNextNum(res.data.next))
       .catch(() => setNextNum('01'));
   }, [edifId, tipoId, sectorId, esComputadora, esConsultorio]);
 
-  // ── 5. Construcción dinámica de la cadena del Hostname usando Códigos ──────
-  useEffect(() => {
-    const { hostname: hn, display: disp } = buildHostname({ edifCode, tipoCode, pisoCode, sectorCode, nextNum, esConsultorio });
-    setHostname(hn);
-    setDisplay(disp);
-  }, [edifCode, tipoCode, pisoCode, sectorCode, nextNum, esComputadora, esConsultorio]);
+  // ── 5. Construcción de la cadena del Hostname usando Códigos ──────
+  // Se deriva directamente de los otros estados en cada render — no hace
+  // falta guardarlo aparte ni sincronizarlo con un efecto.
+  const { hostname, display } = buildHostname({ edifCode, tipoCode, pisoCode, sectorCode, nextNum, esConsultorio });
 
   // ── Temporizador de la reserva ───────────────────────────────
   useEffect(() => {
     if (!locked || lockTimer <= 0) return;
-    const t = setTimeout(() => setLockTimer(s => s - 1), 1000);
+    const t = setTimeout(() => {
+      const next = lockTimer - 1;
+      setLockTimer(next);
+      if (next === 0) {
+        setLocked(false);
+        setLockMsg('⏱ Reserva expirada. Volvé a reservar antes de guardar.');
+      }
+    }, 1000);
     return () => clearTimeout(t);
-  }, [locked, lockTimer]);
-
-  useEffect(() => {
-    if (locked && lockTimer === 0) {
-      setLocked(false);
-      setLockMsg('⏱ Reserva expirada. Volvé a reservar antes de guardar.');
-    }
   }, [locked, lockTimer]);
 
   const handleLock = async () => {
@@ -182,7 +174,10 @@ export default function Builder() {
                 {edificios.map(e => (
                   <div key={e.id}
                     style={{...s.selBtn, ...(edifId === e.id ? s.selActive : {})}}
-                    onClick={() => { setEdifId(e.id); setEdifCode(e.code); }}>
+                    onClick={() => {
+                      setEdifId(e.id); setEdifCode(e.code);
+                      setPisoId(''); setPisoCode(''); setNextNum('');
+                    }}>
                     <div style={s.selCode}>{e.code}</div>
                     <div style={s.selName}>{e.name}</div>
                   </div>
@@ -197,7 +192,7 @@ export default function Builder() {
                 {tipos.map(t => (
                   <div key={t.id}
                     style={{...s.selBtn, ...(tipoId === t.id ? s.selActive : {})}}
-                    onClick={() => { setTipoId(t.id); setTipoCode(t.code); }}>
+                    onClick={() => { setTipoId(t.id); setTipoCode(t.code); setNextNum(''); }}>
                     
                     <div style={s.selCode}>{t.code}</div>
                     <div style={s.selName}>{t.name}</div>
@@ -229,7 +224,7 @@ export default function Builder() {
                       setSectorId(e.target.value);
                       const obj = sectores.find(sec => String(sec.id) === String(e.target.value));
                       setSectorCode(obj ? obj.code : '');
-                      if(obj && obj.code === SECTOR_CONSULTORIO) { setNextNum(''); }
+                      setNextNum('');
                     }} disabled={!pisoId}>
                       <option value="">-- Seleccionar --</option>
                       {sectores.map(sec => <option key={sec.id} value={sec.id}>{sec.name} ({sec.code})</option>)}

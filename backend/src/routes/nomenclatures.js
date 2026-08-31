@@ -79,12 +79,13 @@ router.get('/', auth, async (req, res) => {
     const { tipo, edificio, estado, search } = req.query;
     let query  = `
       SELECT n.*, b.name as building_name, dt.name as device_type_name,
-             s.name as sector_name, ns.state as state_name,
+             s.name as sector_name, f.name as floor_name, ns.state as state_name,
              u.nombre as creador_nombre -- Traemos el nombre del creador de la nomenclatura
       FROM nomenclatures n
       LEFT JOIN buildings b            ON n.building_id = b.id
       LEFT JOIN device_types dt        ON n.device_type_id = dt.id
       LEFT JOIN sectors s              ON n.sector_id = s.id
+      LEFT JOIN floors f               ON n.floor_id = f.id
       LEFT JOIN nomenclature_states ns ON n.state_id = ns.id
       LEFT JOIN users u                ON n.created_by = u.id -- JOIN agregado
       WHERE 1=1`;
@@ -117,22 +118,35 @@ router.get('/', auth, async (req, res) => {
 // ── POST /api/nomenclatures ─────────────────────────────────
 // Guarda el registro definitivamente
 router.post('/', auth, async (req, res) => {
-  const { hostname, tipo, edificio, sector, sequential_number } = req.body;
+  const {
+    hostname, tipo, edificio, sector, floor_id, sequential_number,
+    usuario_windows, numero_serie, notas
+  } = req.body;
 
   if (!hostname || !tipo || !edificio || !sequential_number)
     return res.status(400).json({ error: 'Faltan campos obligatorios' });
 
   try {
-    await redis.del(`lock:${hostname}`);
+    // Solo el usuario que reservó el hostname puede confirmarlo — evita que
+    // otro técnico pise una reserva ajena al guardar.
+    const lockKey = `lock:${hostname}`;
+    const existingLock = await redis.get(lockKey);
+    if (existingLock && JSON.parse(existingLock).userId !== req.user.id)
+      return res.status(409).json({ error: 'Hostname reservado por otro usuario' });
 
-    // Agregamos 'created_by' en las columnas y el parámetro $6
     const result = await db.query(
       `INSERT INTO nomenclatures
-        (generated_code, building_id, device_type_id, sector_id, sequential_number, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6)
+        (generated_code, building_id, device_type_id, sector_id, floor_id, sequential_number,
+         created_by, usuario_windows, numero_serie, notas)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING *`,
-      [hostname, edificio, tipo, sector || null, sequential_number, req.user.id] // req.user.id asigna al creador
+      [
+        hostname, edificio, tipo, sector || null, floor_id || null, sequential_number,
+        req.user.id, usuario_windows || null, numero_serie || null, notas || null
+      ]
     );
+
+    await redis.del(lockKey);
 
     const nomenclature = result.rows[0];
 
@@ -198,10 +212,22 @@ router.post('/lock', auth, async (req, res) => {
 
   const key = `lock:${hostname}`;
 
-  const existing = await redis.get(key);
-  if (existing) {
+  const inDb = await db.query('SELECT id FROM nomenclatures WHERE generated_code = $1', [hostname]);
+  if (inDb.rows.length > 0)
+    return res.status(409).json({ error: 'Hostname ya existe en la base de datos' });
+
+  // SET ... NX es atómico: si dos requests llegan al mismo tiempo para el
+  // mismo hostname, solo uno consigue setear la clave (evita que ambos
+  // crean tener la reserva bajo carga concurrente).
+  const acquired = await redis.set(key, JSON.stringify({
+    nombre: req.user.nombre,
+    email:  req.user.email,
+    userId: req.user.id,
+  }), 'EX', LOCK_TTL, 'NX');
+
+  if (!acquired) {
     const ttl  = await redis.ttl(key);
-    const data = JSON.parse(existing);
+    const data = JSON.parse(await redis.get(key) || '{}');
     return res.status(409).json({
       error:      'Hostname reservado por otro usuario',
       locked_by:  data.nombre,
@@ -209,23 +235,18 @@ router.post('/lock', auth, async (req, res) => {
     });
   }
 
-  const inDb = await db.query('SELECT id FROM nomenclatures WHERE generated_code = $1', [hostname]);
-  if (inDb.rows.length > 0)
-    return res.status(409).json({ error: 'Hostname ya existe en la base de datos' });
-
-  await redis.set(key, JSON.stringify({
-    nombre: req.user.nombre,
-    email:  req.user.email,
-    userId: req.user.id,
-  }), 'EX', LOCK_TTL);
-
   res.json({ ok: true, hostname, expires_in: LOCK_TTL });
 });
 
 // ── DELETE /api/nomenclatures/lock/:hostname ────────────────
-// Libera el lock manualmente
+// Libera el lock manualmente (solo el dueño de la reserva puede liberarla)
 router.delete('/lock/:hostname', auth, async (req, res) => {
-  await redis.del(`lock:${req.params.hostname}`);
+  const key = `lock:${req.params.hostname}`;
+  const existing = await redis.get(key);
+  if (existing && JSON.parse(existing).userId !== req.user.id)
+    return res.status(403).json({ error: 'La reserva pertenece a otro usuario' });
+
+  await redis.del(key);
   res.json({ ok: true });
 });
 

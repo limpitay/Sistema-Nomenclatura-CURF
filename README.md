@@ -145,9 +145,13 @@ transiciones generado/reasignado/baja).
 | building_id | INT FK → buildings | Edificio |
 | device_type_id | INT FK → device_types | Tipo de dispositivo |
 | sector_id | INT FK → sectors, nullable | Sector (TT/LL/CAM/FID no lo usan) |
+| floor_id | INT FK → floors, nullable | Piso |
 | sequential_number | INTEGER | Número secuencial dentro de su grupo |
 | state_id | INT FK → nomenclature_states | Estado actual |
 | created_by | INT FK → users | Técnico que lo creó |
+| usuario_windows | VARCHAR(100), nullable | Solo PC/NB (ver `TIPOS_CON_USUARIO`) |
+| numero_serie | VARCHAR(100), nullable | Número de serie del equipo |
+| notas | TEXT, nullable | Observaciones cargadas al alta |
 | created_at / updated_at | TIMESTAMP | Fechas de alta / última modificación |
 
 ### `nomenclature_history`

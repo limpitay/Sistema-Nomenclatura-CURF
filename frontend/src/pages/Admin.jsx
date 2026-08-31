@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/useAuth';
 import client from '../api/client';
 import Layout from '../components/Layout';
 
@@ -41,6 +41,10 @@ export default function Admin() {
     }
   }, [rolFiltro, estadoFiltro, search]);
 
+  // No incluimos 'fetchUsers' en las deps a propósito: cambia de identidad
+  // con 'search', y este efecto solo debe refetchear al cambiar los
+  // selectores de rol/estado (la búsqueda por texto es manual, vía Buscar).
+  // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
   useEffect(() => { fetchUsers(); }, [rolFiltro, estadoFiltro]);
 
   const handleSearch = (e) => {
