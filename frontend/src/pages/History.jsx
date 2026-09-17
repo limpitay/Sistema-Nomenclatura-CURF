@@ -20,10 +20,19 @@ export default function History() {
   const [loading,   setLoading]   = useState(true);
   const [search,    setSearch]    = useState('');
   const [estado,    setEstado]    = useState('todos');
+  const [tipos,     setTipos]     = useState([]);
+  const [tipo,      setTipo]      = useState('todos');
   const [selected,  setSelected]  = useState(null);
   const [nextEstado, setNextEstado] = useState('');
   const [events,    setEvents]    = useState([]);
   const [loadingEv, setLoadingEv] = useState(false);
+
+  // ── Catálogo de tipos, para los botones de filtro ──────────
+  useEffect(() => {
+    client.get('/nomenclatures/catalogs/device-types')
+      .then(res => setTipos(res.data))
+      .catch(err => console.error('Error al traer tipos desde BD:', err));
+  }, []);
 
   // ── Cargar nomenclatures ───────────────────────────────────
   const fetchnomenclatures = useCallback(async () => {
@@ -31,6 +40,7 @@ export default function History() {
     try {
       const params = {};
       if (estado !== 'todos') params.estado = estado;
+      if (tipo !== 'todos') params.tipo = tipo;
       if (search) params.search = search;
       const res = await client.get('/nomenclatures', { params });
       setnomenclatures(res.data);
@@ -39,13 +49,13 @@ export default function History() {
     } finally {
       setLoading(false);
     }
-  }, [estado, search]);
+  }, [estado, tipo, search]);
 
   // No incluimos 'fetchnomenclatures' en las deps a propósito: cambia de
   // identidad con 'search', y este efecto solo debe refetchear al cambiar de
-  // pestaña de estado (la búsqueda por texto es manual, vía el botón Buscar).
+  // pestaña de estado o tipo (la búsqueda por texto es manual, vía el botón Buscar).
   // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
-  useEffect(() => { fetchnomenclatures(); }, [estado]);
+  useEffect(() => { fetchnomenclatures(); }, [estado, tipo]);
 
   const handleSearch = (e) => {
     e.preventDefault();
@@ -127,6 +137,19 @@ export default function History() {
                 </button>
               ))}
             </div>
+          </div>
+
+          <div style={s.tipoTabs}>
+            <button style={{...s.estadoTab, ...(tipo==='todos' ? s.estadoActive : {})}}
+              onClick={() => setTipo('todos')}>
+              Todos
+            </button>
+            {tipos.map(t => (
+              <button key={t.id} style={{...s.estadoTab, ...(String(tipo)===String(t.id) ? s.estadoActive : {})}}
+                onClick={() => setTipo(t.id)}>
+                {t.name}
+              </button>
+            ))}
           </div>
         </div>
 
@@ -270,6 +293,7 @@ const s = {
   searchInput:{ flex:1, border:'1px solid #c8c6bc', borderRadius:6, padding:'8px 12px', fontSize:13, outline:'none', background:'#fff', color:'#1a1a18' },
   input:      { border:'1px solid #c8c6bc', borderRadius:6, padding:'8px 10px', fontSize:13, outline:'none', fontFamily:'inherit', background:'#fff', color:'#1a1a18' },
   estadoTabs: { display:'flex', gap:4, flexWrap:'wrap' },
+  tipoTabs:   { display:'flex', gap:4, flexWrap:'wrap', marginTop:12, paddingTop:12, borderTop:'1px solid #f0efe9' },
   estadoTab:  { border:'1px solid #c8c6bc', borderRadius:20, padding:'5px 12px', fontSize:12, fontWeight:600, cursor:'pointer', background:'#fff', color:'#585754' },
   estadoActive:{ background:'#1a52be', color:'#fff', borderColor:'#1a52be' },
   table:      { width:'100%', borderCollapse:'collapse', fontSize:13 },

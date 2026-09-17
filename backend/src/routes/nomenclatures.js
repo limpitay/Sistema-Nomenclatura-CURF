@@ -173,24 +173,41 @@ router.post('/', auth, async (req, res) => {
   }
 });
 
+// Tipos cuyo correlativo es global: no depende del edificio, siempre
+// continúa la misma secuencia sin importar en qué edificio se genere.
+const CORRELATIVO_GLOBAL = ['TT', 'LL', 'CAM', 'FID'];
+
 // ── GET /api/nomenclatures/next ─────────────────────────────
 // Próximo número secuencial disponible para tipo+edificio+sector
+// (o solo tipo, si el tipo usa correlativo global)
 router.get('/next', auth, async (req, res) => {
   const { tipo, edificio, sector } = req.query;
   if (!tipo || !edificio)
     return res.status(400).json({ error: 'tipo y edificio son requeridos' });
 
   try {
-    // Si viene sector, el contador es Edificio+Sector+Tipo (PC, NB, etc.)
-    // Si NO viene sector, el contador es solo Edificio+Tipo (TT, LL, CAM)
-    const query = sector
-      ? `SELECT sequential_number FROM nomenclatures
-         WHERE device_type_id = $1 AND building_id = $2 AND sector_id = $3
-         ORDER BY sequential_number ASC`
-      : `SELECT sequential_number FROM nomenclatures
-         WHERE device_type_id = $1 AND building_id = $2
-         ORDER BY sequential_number ASC`;
-    const params = sector ? [tipo, edificio, sector] : [tipo, edificio];
+    const tipoRow = await db.query('SELECT code FROM device_types WHERE id = $1', [tipo]);
+    if (!tipoRow.rows.length)
+      return res.status(400).json({ error: 'Tipo de dispositivo inválido' });
+
+    let query, params;
+    if (CORRELATIVO_GLOBAL.includes(tipoRow.rows[0].code)) {
+      query = `SELECT sequential_number FROM nomenclatures
+                WHERE device_type_id = $1
+                ORDER BY sequential_number ASC`;
+      params = [tipo];
+    } else if (sector) {
+      // Si viene sector, el contador es Edificio+Sector+Tipo (PC, NB, etc.)
+      query = `SELECT sequential_number FROM nomenclatures
+                WHERE device_type_id = $1 AND building_id = $2 AND sector_id = $3
+                ORDER BY sequential_number ASC`;
+      params = [tipo, edificio, sector];
+    } else {
+      query = `SELECT sequential_number FROM nomenclatures
+                WHERE device_type_id = $1 AND building_id = $2
+                ORDER BY sequential_number ASC`;
+      params = [tipo, edificio];
+    }
 
     const result = await db.query(query, params);
 
