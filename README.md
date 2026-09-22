@@ -46,7 +46,7 @@ Sistema-Nomenclatura-CURF/
 ├── backend/
 │   ├── package.json
 │   ├── scripts/
-│   │   └── create-user.js     ← alta de usuarios reales (no hay endpoint de admin)
+│   │   └── create-user.js     ← alta del primer admin (después se gestionan desde /admin)
 │   └── src/
 │       ├── index.js
 │       ├── db.js                ← pool PostgreSQL
@@ -131,7 +131,8 @@ transiciones generado/reasignado/baja).
 |---|---|---|
 | id | SERIAL PK | Identificador único |
 | nombre | VARCHAR(255) | Nombre del técnico |
-| email | VARCHAR(255) UNIQUE | Email de acceso |
+| username | VARCHAR(100) UNIQUE | Usuario de acceso (login) |
+| email | VARCHAR(255) UNIQUE, nullable | Email de contacto (opcional) |
 | password | VARCHAR(255) | Hash bcrypt de la contraseña |
 | rol | VARCHAR(50) | `technician` (default) o `admin` |
 | activo | BOOLEAN | Estado de la cuenta |
@@ -207,13 +208,17 @@ cp .env.example .env
 docker compose -f docker-compose.prod.yml up --build -d
 ```
 
-Como no hay endpoint de administración de usuarios, el primer usuario (y
-cualquier alta posterior) se crea así:
+El login es por usuario + contraseña (no email). Como todavía no hay ningún
+admin para entrar al panel `/admin`, el primer usuario se crea a mano una
+sola vez:
 
 ```bash
 docker compose -f docker-compose.prod.yml exec api npm run create-user -- \
-  "Nombre Apellido" email@dominio.com "contraseña-segura" admin
+  "Nombre Apellido" nombredeusuario "contraseña-segura" admin
 ```
+
+De ahí en adelante, altas, ediciones y bajas de usuarios (incluido borrado
+definitivo) se manejan desde el panel `/admin` con esa cuenta.
 
 **Pendiente antes de exponerlo a internet:** el compose de producción sirve
 todo por HTTP en el puerto 80. Para HTTPS hay que ponerlo detrás de un reverse

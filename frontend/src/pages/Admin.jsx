@@ -8,7 +8,7 @@ const ROL_BADGE = {
   technician:  { label: 'Técnico', bg: '#f0efe9', color: '#585754' },
 };
 
-const emptyForm = { nombre: '', email: '', password: '', rol: 'technician', activo: true };
+const emptyForm = { nombre: '', username: '', email: '', password: '', rol: 'technician', activo: true };
 
 export default function Admin() {
   const { user } = useAuth();
@@ -24,6 +24,7 @@ export default function Admin() {
   const [form,      setForm]      = useState(emptyForm);
   const [saving,    setSaving]    = useState(false);
   const [formError, setFormError] = useState('');
+  const [deletingId, setDeletingId] = useState(null);
 
   const fetchUsers = useCallback(async () => {
     setLoading(true);
@@ -65,7 +66,7 @@ export default function Admin() {
 
   const openEdit = (u) => {
     setEditing(u);
-    setForm({ nombre: u.nombre, email: u.email, password: '', rol: u.rol, activo: u.activo });
+    setForm({ nombre: u.nombre, username: u.username, email: u.email || '', password: '', rol: u.rol, activo: u.activo });
     setFormError('');
     setModalOpen(true);
   };
@@ -75,12 +76,13 @@ export default function Admin() {
     setSaving(true); setFormError('');
     try {
       if (editing) {
-        const payload = { nombre: form.nombre, rol: form.rol, activo: form.activo };
+        const payload = { nombre: form.nombre, username: form.username, rol: form.rol, activo: form.activo };
         if (form.password) payload.password = form.password;
         await client.patch(`/users/${editing.id}`, payload);
       } else {
         await client.post('/users', {
-          nombre: form.nombre, email: form.email, password: form.password, rol: form.rol,
+          nombre: form.nombre, username: form.username, email: form.email || undefined,
+          password: form.password, rol: form.rol,
         });
       }
       setModalOpen(false);
@@ -89,6 +91,20 @@ export default function Admin() {
       setFormError(err.response?.data?.error || 'Error al guardar');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDelete = async (u) => {
+    if (!window.confirm(`¿Eliminar definitivamente a "${u.nombre}"? Esta acción no se puede deshacer.`))
+      return;
+    setDeletingId(u.id);
+    try {
+      await client.delete(`/users/${u.id}`);
+      fetchUsers();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Error al eliminar usuario');
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -119,7 +135,7 @@ export default function Admin() {
                 style={s.searchInput}
                 value={search}
                 onChange={e => setSearch(e.target.value)}
-                placeholder="Nombre o email…"
+                placeholder="Nombre, usuario o email…"
               />
               <button type="submit" style={s.btnPrimary}>Buscar</button>
             </form>
@@ -158,7 +174,7 @@ export default function Admin() {
               <table style={s.table}>
                 <thead>
                   <tr>
-                    {['Nombre', 'Email', 'Rol', 'Estado', 'Creado', ''].map(h => (
+                    {['Nombre', 'Usuario', 'Email', 'Rol', 'Estado', 'Creado', ''].map(h => (
                       <th key={h} style={s.th}>{h}</th>
                     ))}
                   </tr>
@@ -167,12 +183,22 @@ export default function Admin() {
                   {users.map(u => (
                     <tr key={u.id} style={s.tr}>
                       <td style={s.td}>{u.nombre}</td>
-                      <td style={{ ...s.td, color: '#666' }}>{u.email}</td>
+                      <td style={{ ...s.td, fontFamily: 'monospace' }}>{u.username}</td>
+                      <td style={{ ...s.td, color: '#666' }}>{u.email || '—'}</td>
                       <td style={s.td}>{rolBadge(u.rol)}</td>
                       <td style={s.td}>{estadoBadge(u.activo)}</td>
                       <td style={{ ...s.td, fontSize: 11, fontFamily: 'monospace', color: '#999' }}>{fmtDate(u.created_at)}</td>
-                      <td style={s.td}>
+                      <td style={{ ...s.td, display: 'flex', gap: 6 }}>
                         <button style={s.btnDetail} onClick={() => openEdit(u)}>Editar</button>
+                        {u.id !== user?.id && (
+                          <button
+                            style={s.btnDanger}
+                            disabled={deletingId === u.id}
+                            onClick={() => handleDelete(u)}
+                          >
+                            {deletingId === u.id ? '…' : 'Eliminar'}
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -205,14 +231,26 @@ export default function Admin() {
             </div>
 
             <div style={s.field}>
-              <label style={s.label}>Email</label>
+              <label style={s.label}>Usuario</label>
+              <input
+                style={s.input}
+                type="text"
+                value={form.username}
+                onChange={e => setForm({ ...form, username: e.target.value })}
+                autoCapitalize="none"
+                autoCorrect="off"
+                required
+              />
+            </div>
+
+            <div style={s.field}>
+              <label style={s.label}>Email (opcional)</label>
               <input
                 style={{ ...s.input, ...(editing ? { background: '#f0efe9', color: '#999' } : {}) }}
                 type="email"
                 value={form.email}
                 onChange={e => setForm({ ...form, email: e.target.value })}
                 disabled={!!editing}
-                required
               />
             </div>
 
@@ -295,6 +333,7 @@ const s = {
   td:         { padding: '10px', verticalAlign: 'middle' },
   badge:      { fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 10 },
   btnDetail:  { fontSize: 11, padding: '3px 10px', borderRadius: 4, cursor: 'pointer', border: '1px solid #c8c6bc', background: '#fff', color: '#585754' },
+  btnDanger:  { fontSize: 11, padding: '3px 10px', borderRadius: 4, cursor: 'pointer', border: '1px solid #f0b0b0', background: '#fff', color: '#b83030' },
   btnPrimary: { background: '#1a52be', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer' },
   btnGhost:   { background: '#f8f9fa', color: '#1a52be', border: '1px solid #1a52be', borderRadius: 6, padding: '8px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer' },
   errorBox:   { background: '#fceaea', color: '#b83030', padding: 10, borderRadius: 6, marginTop: 10, fontSize: 13 },

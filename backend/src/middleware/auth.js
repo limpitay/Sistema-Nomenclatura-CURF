@@ -15,7 +15,7 @@ module.exports = async (req, res, next) => {
     const payload = jwt.verify(token, process.env.JWT_SECRET);
 
     const result = await db.query(
-      'SELECT id, nombre, email, rol, activo FROM users WHERE id = $1',
+      'SELECT id, nombre, username, email, rol, activo FROM users WHERE id = $1',
       [payload.id]
     );
     const user = result.rows[0];

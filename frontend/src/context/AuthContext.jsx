@@ -18,8 +18,8 @@ export function AuthProvider({ children }) {
       .finally(() => setLoading(false));
   }, []);
 
-  const login = async (email, password) => {
-    const res = await client.post('/auth/login', { email, password });
+  const login = async (username, password) => {
+    const res = await client.post('/auth/login', { username, password });
     localStorage.setItem('token', res.data.token);
     setUser(res.data.user);
     return res.data;

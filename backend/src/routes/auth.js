@@ -18,11 +18,11 @@ const loginLimiter = rateLimit({
 
 // POST /api/auth/login
 router.post('/login', loginLimiter, async (req, res) => {
-  const { email, password } = req.body;
+  const { username, password } = req.body;
 
-  if (!email || !password) {
+  if (!username || !password) {
     return res.status(400).json({
-      error: 'Email y contraseña requeridos'
+      error: 'Usuario y contraseña requeridos'
     });
   }
 
@@ -31,9 +31,9 @@ router.post('/login', loginLimiter, async (req, res) => {
     const result = await db.query(
       `SELECT *
        FROM users
-       WHERE email = $1
+       WHERE username = $1
        AND activo = true`,
-      [email]
+      [username]
     );
 
     if (result.rows.length === 0) {
@@ -58,7 +58,7 @@ router.post('/login', loginLimiter, async (req, res) => {
     const token = jwt.sign(
       {
         id: user.id,
-        email: user.email,
+        username: user.username,
         nombre: user.nombre,
         rol: user.rol
       },
@@ -73,6 +73,7 @@ router.post('/login', loginLimiter, async (req, res) => {
       user: {
         id: user.id,
         nombre: user.nombre,
+        username: user.username,
         email: user.email,
         rol: user.rol
       }

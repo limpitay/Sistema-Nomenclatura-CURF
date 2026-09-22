@@ -14,7 +14,7 @@ router.use(auth, requireAdmin);
 router.get('/', async (req, res) => {
   try {
     const { rol, estado, search } = req.query;
-    let query = `SELECT id, nombre, email, rol, activo, created_at FROM users WHERE 1=1`;
+    let query = `SELECT id, nombre, username, email, rol, activo, created_at FROM users WHERE 1=1`;
     const params = [];
     let i = 1;
 
@@ -22,7 +22,7 @@ router.get('/', async (req, res) => {
     if (estado === 'activo')   { query += ` AND activo = true`; }
     if (estado === 'inactivo') { query += ` AND activo = false`; }
     if (search) {
-      query += ` AND (nombre ILIKE $${i} OR email ILIKE $${i})`;
+      query += ` AND (nombre ILIKE $${i} OR username ILIKE $${i} OR email ILIKE $${i})`;
       params.push(`%${search}%`);
       i++;
     }
@@ -40,10 +40,10 @@ router.get('/', async (req, res) => {
 // ── POST /api/users ─────────────────────────────────────────
 // Crea un usuario nuevo
 router.post('/', async (req, res) => {
-  const { nombre, email, password, rol } = req.body;
+  const { nombre, username, email, password, rol } = req.body;
 
-  if (!nombre || !email || !password)
-    return res.status(400).json({ error: 'Nombre, email y contraseña son obligatorios' });
+  if (!nombre || !username || !password)
+    return res.status(400).json({ error: 'Nombre, usuario y contraseña son obligatorios' });
   if (password.length < 8)
     return res.status(400).json({ error: 'La contraseña debe tener al menos 8 caracteres' });
   const rolFinal = rol || 'technician';
@@ -53,15 +53,15 @@ router.post('/', async (req, res) => {
   try {
     const hash = await bcrypt.hash(password, 10);
     const result = await db.query(
-      `INSERT INTO users (nombre, email, password, rol)
-       VALUES ($1, $2, $3, $4)
-       RETURNING id, nombre, email, rol, activo, created_at`,
-      [nombre, email, hash, rolFinal]
+      `INSERT INTO users (nombre, username, email, password, rol)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, nombre, username, email, rol, activo, created_at`,
+      [nombre, username, email || null, hash, rolFinal]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
     if (err.code === '23505')
-      return res.status(409).json({ error: 'Ya existe un usuario con ese email' });
+      return res.status(409).json({ error: err.constraint === 'users_email_key' ? 'Ya existe un usuario con ese email' : 'Ya existe un usuario con ese nombre de usuario' });
     console.error(err);
     res.status(500).json({ error: 'Error al crear usuario' });
   }
@@ -71,7 +71,7 @@ router.post('/', async (req, res) => {
 // Edita nombre / rol / estado activo, y opcionalmente resetea la contraseña
 router.patch('/:id', async (req, res) => {
   const targetId = Number(req.params.id);
-  const { nombre, rol, activo, password } = req.body;
+  const { nombre, username, rol, activo, password } = req.body;
 
   if (rol && !['admin', 'technician'].includes(rol))
     return res.status(400).json({ error: 'Rol inválido' });
@@ -89,9 +89,10 @@ router.patch('/:id', async (req, res) => {
     const params = [];
     let i = 1;
 
-    if (nombre !== undefined) { fields.push(`nombre = $${i++}`); params.push(nombre); }
-    if (rol !== undefined)    { fields.push(`rol = $${i++}`);    params.push(rol); }
-    if (activo !== undefined) { fields.push(`activo = $${i++}`); params.push(activo); }
+    if (nombre !== undefined)   { fields.push(`nombre = $${i++}`);   params.push(nombre); }
+    if (username !== undefined) { fields.push(`username = $${i++}`); params.push(username); }
+    if (rol !== undefined)      { fields.push(`rol = $${i++}`);      params.push(rol); }
+    if (activo !== undefined)   { fields.push(`activo = $${i++}`);   params.push(activo); }
     if (password) {
       const hash = await bcrypt.hash(password, 10);
       fields.push(`password = $${i++}`);
@@ -104,7 +105,7 @@ router.patch('/:id', async (req, res) => {
     params.push(targetId);
     const result = await db.query(
       `UPDATE users SET ${fields.join(', ')} WHERE id = $${i}
-       RETURNING id, nombre, email, rol, activo, created_at`,
+       RETURNING id, nombre, username, email, rol, activo, created_at`,
       params
     );
 
@@ -114,9 +115,34 @@ router.patch('/:id', async (req, res) => {
     res.json(result.rows[0]);
   } catch (err) {
     if (err.code === '23505')
-      return res.status(409).json({ error: 'Ya existe un usuario con ese email' });
+      return res.status(409).json({ error: err.constraint === 'users_email_key' ? 'Ya existe un usuario con ese email' : 'Ya existe un usuario con ese nombre de usuario' });
     console.error(err);
     res.status(500).json({ error: 'Error al actualizar usuario' });
+  }
+});
+
+// ── DELETE /api/users/:id ───────────────────────────────────
+// Elimina un usuario definitivamente. Las nomenclatures/historial/audit_log
+// que haya generado quedan intactas: solo pierden la referencia al creador
+// (las FK a users.id son ON DELETE SET NULL).
+router.delete('/:id', async (req, res) => {
+  const targetId = Number(req.params.id);
+
+  if (req.user.id === targetId)
+    return res.status(400).json({ error: 'No podés eliminar tu propia cuenta' });
+
+  try {
+    const result = await db.query(
+      'DELETE FROM users WHERE id = $1 RETURNING id',
+      [targetId]
+    );
+    if (!result.rows.length)
+      return res.status(404).json({ error: 'Usuario no encontrado' });
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error al eliminar usuario' });
   }
 });
 

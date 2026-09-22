@@ -5,7 +5,7 @@ import { useAuth } from '../context/useAuth';
 export default function Login() {
   const { login } = useAuth();
   const navigate  = useNavigate();
-  const [email,    setEmail]    = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error,    setError]    = useState('');
   const [loading,  setLoading]  = useState(false);
@@ -15,7 +15,7 @@ export default function Login() {
     setError('');
     setLoading(true);
     try {
-      await login(email, password);
+      await login(username, password);
       navigate('/');
     } catch (err) {
       setError(err.response?.data?.error || 'Error al iniciar sesión');
@@ -30,18 +30,20 @@ export default function Login() {
         <div style={styles.brand}>
           <span style={styles.pill}>CURF</span>
           <h2 style={styles.title}>Sistema de Nomenclatura</h2>
-          <p style={styles.sub}>Ingresá con tu cuenta institucional</p>
+          <p style={styles.sub}>Ingresá con tu usuario y contraseña</p>
         </div>
 
         <form onSubmit={handleSubmit} style={styles.form}>
           <div style={styles.field}>
-            <label style={styles.label}>Correo institucional</label>
+            <label style={styles.label}>Usuario</label>
             <input
-              type="email"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              placeholder="usuario@curf.net"
+              type="text"
+              value={username}
+              onChange={e => setUsername(e.target.value)}
+              placeholder="usuario"
               style={styles.input}
+              autoCapitalize="none"
+              autoCorrect="off"
               required
             />
           </div>

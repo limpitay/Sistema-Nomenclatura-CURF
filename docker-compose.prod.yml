@@ -8,7 +8,7 @@
 # Uso:
 #   cp .env.example .env   # completar con valores reales de producción
 #   docker compose -f docker-compose.prod.yml up --build -d
-#   docker compose -f docker-compose.prod.yml exec api npm run create-user -- "Nombre" email@dominio.com password admin
+#   docker compose -f docker-compose.prod.yml exec api npm run create-user -- "Nombre" usuario password admin
 
 services:
   postgres:

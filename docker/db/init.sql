@@ -143,7 +143,8 @@ INSERT INTO nomenclature_states (state, description, is_active) VALUES
 CREATE TABLE users (
   id SERIAL PRIMARY KEY,
   nombre VARCHAR(255) NOT NULL,
-  email VARCHAR(255) NOT NULL UNIQUE,
+  username VARCHAR(100) NOT NULL UNIQUE, -- Login simple: usuario + contraseña (no email)
+  email VARCHAR(255) UNIQUE,
   password VARCHAR(255) NOT NULL,
   rol VARCHAR(50) DEFAULT 'technician',
   activo BOOLEAN DEFAULT TRUE,
