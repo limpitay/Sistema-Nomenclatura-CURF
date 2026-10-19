@@ -6,6 +6,10 @@ const request = require('supertest');
 jest.mock('../db', () => ({ query: jest.fn() }));
 jest.mock('../redis', () => ({ set: jest.fn(), get: jest.fn(), ttl: jest.fn(), del: jest.fn() }));
 jest.mock('../ldap', () => ({ equipoEnAD: jest.fn(), nombresEquiposAD: jest.fn() }));
+jest.mock('../hikcentral', () => ({
+  ...jest.requireActual('../hikcentral'),
+  estadoCamaras: jest.fn(), reservarCamara: jest.fn(), anularCamara: jest.fn(),
+}));
 jest.mock('../middleware/auth', () => (req, res, next) => {
   req.user = { id: 1, nombre: 'Técnico Test', email: null };
   next();
@@ -14,6 +18,7 @@ jest.mock('../middleware/auth', () => (req, res, next) => {
 const db = require('../db');
 const redis = require('../redis');
 const { equipoEnAD, nombresEquiposAD } = require('../ldap');
+const { estadoCamaras, reservarCamara, anularCamara } = require('../hikcentral');
 const router = require('./nomenclatures');
 
 const app = express();
@@ -22,9 +27,20 @@ app.use('/api/nomenclatures', router);
 
 // ── Base simulada ───────────────────────────────────────────
 const TIPOS = { 1: 'PC', 3: 'CAM', 4: 'TT' };
-const EDIFICIOS = { 1: 'JR', 2: 'ON' };
+const EDIFICIOS = { 1: 'JR', 2: 'ON', 6: 'LI' };
 const SECTORES = { 5: 'AUD' };
-const PISOS = [{ building_id: 1, code: 'PB' }, { building_id: 1, code: 'P1' }, { building_id: 2, code: 'PB' }];
+const PISOS = [
+  { id: 1, building_id: 1, code: 'PB' }, { id: 2, building_id: 1, code: 'P1' },
+  { id: 5, building_id: 1, code: 'P3' }, { id: 3, building_id: 2, code: 'PB' },
+];
+
+// Estado del generador CAM que devuelve HikCentral
+const estadoHik = (nextJR, unreachableNvrs = []) => ({
+  buildings: [{ code: 'JR', name: 'Jacinto Rios', nextNumber: nextJR }, { code: 'ON', name: 'Oncativo', nextNumber: nextJR }],
+  floors: ['SS', 'PB', 'P1', 'P2', 'P3'],
+  reservations: [],
+  unreachableNvrs,
+});
 
 let usadosEnBase;   // sequential_number que devuelve la base para /next
 let hostnamesEnBase; // generated_code que ya existen (para /lock)
@@ -46,6 +62,13 @@ db.query.mockImplementation(async (sql, params = []) => {
     return filas([...new Set(PISOS.map(p => p.code))].map(code => ({ code })));
   if (/FROM floors WHERE building_id/.test(sql))
     return filas(PISOS.filter(p => p.building_id === Number(params[0])).map(({ code }) => ({ code })));
+  if (/FROM floors WHERE id/.test(sql))
+    return filas(PISOS.filter(p => p.id === Number(params[0])).map(({ code }) => ({ code })));
+  if (/INSERT INTO nomenclatures/.test(sql)) {
+    if (hostnamesEnBase.includes(params[0])) throw Object.assign(new Error('duplicado'), { code: '23505' });
+    return filas([{ id: 10, generated_code: params[0], state_id: 1 }]);
+  }
+  if (/INSERT INTO (nomenclature_history|audit_log)/.test(sql)) return filas([]);
   if (/SELECT id FROM nomenclatures WHERE generated_code/.test(sql))
     return filas(hostnamesEnBase.includes(params[0]) ? [{ id: 99 }] : []);
   throw new Error(`Query no simulada en el test: ${sql}`);
@@ -59,6 +82,11 @@ beforeEach(() => {
   redis.set.mockReset().mockResolvedValue('OK');
   redis.get.mockReset().mockResolvedValue(null);
   redis.ttl.mockReset().mockResolvedValue(0);
+  redis.del.mockReset().mockResolvedValue(1);
+  db.query.mockClear(); // conserva la base simulada, borra las llamadas del test anterior
+  estadoCamaras.mockReset().mockResolvedValue(estadoHik(1));
+  reservarCamara.mockReset().mockResolvedValue({});
+  anularCamara.mockReset().mockResolvedValue({ ok: true });
   jest.spyOn(console, 'warn').mockImplementation(() => {});
 });
 
@@ -66,6 +94,7 @@ afterEach(() => jest.restoreAllMocks());
 
 const next = (query) => request(app).get('/api/nomenclatures/next').query(query);
 const lock = (body) => request(app).post('/api/nomenclatures/lock').send(body);
+const guardar = (body) => request(app).post('/api/nomenclatures').send(body);
 
 // ═══════════════════════════════════════════════════════════
 describe('GET /next — número sugerido', () => {
@@ -102,13 +131,39 @@ describe('GET /next — número sugerido', () => {
     expect(nombresEquiposAD).toHaveBeenCalledWith(['TT']);
   });
 
-  test('CAM: no consulta el AD', async () => {
-    usadosEnBase = [1];
+  test('CAM: el número lo da HikCentral (no la base ni el AD)', async () => {
+    usadosEnBase = [1, 2, 3];
+    estadoCamaras.mockResolvedValue(estadoHik(31));
 
     const res = await next({ tipo: 3, edificio: 1 });
 
-    expect(res.body).toEqual({ next: '02', ad_verificado: null });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ next: '31', ad_verificado: null, aviso_hik: null });
     expect(nombresEquiposAD).not.toHaveBeenCalled();
+  });
+
+  test('CAM: avisa si algún NVR no responde', async () => {
+    estadoCamaras.mockResolvedValue(estadoHik(4, ['NVR-JR-1']));
+
+    const res = await next({ tipo: 3, edificio: 1 });
+
+    expect(res.body.aviso_hik).toMatch(/No responde NVR-JR-1/);
+  });
+
+  test('CAM: edificio que HikCentral no numera', async () => {
+    const res = await next({ tipo: 3, edificio: 6 });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('El panel de Cámaras no numera cámaras de LI');
+  });
+
+  test('CAM: HikCentral caído, no sugiere número', async () => {
+    estadoCamaras.mockRejectedValue(Object.assign(new Error('HikCentral no respondió (ECONNREFUSED)'), { status: 502 }));
+
+    const res = await next({ tipo: 3, edificio: 1 });
+
+    expect(res.status).toBe(502);
+    expect(res.body.error).toMatch(/HikCentral no respondió/);
   });
 
   test('AD caído: sugiere solo con la base y avisa que no se verificó', async () => {
@@ -158,11 +213,50 @@ describe('POST /lock — reservar', () => {
     expect(redis.set).not.toHaveBeenCalled();
   });
 
-  test('CAM: no consulta el AD', async () => {
-    const res = await lock({ hostname: 'CAMPBJR01', tipo: 3 });
+  test('CAM: reserva si es el próximo libre en HikCentral, sin consultar el AD', async () => {
+    estadoCamaras.mockResolvedValue(estadoHik(31));
+
+    const res = await lock({ hostname: 'CAMJRP331', tipo: 3 });
 
     expect(res.status).toBe(200);
     expect(equipoEnAD).not.toHaveBeenCalled();
+    expect(redis.set).toHaveBeenCalled();
+  });
+
+  test('CAM: ya no es el próximo libre, rechaza y dice cuál es', async () => {
+    estadoCamaras.mockResolvedValue(estadoHik(32));
+
+    const res = await lock({ hostname: 'CAMJRP331', tipo: 3 });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('CAMJRP331 ya no está libre: el próximo es CAMJRP332');
+    expect(redis.set).not.toHaveBeenCalled();
+  });
+
+  test('CAM: hostname que no respeta el formato se rechaza', async () => {
+    const res = await lock({ hostname: 'CAMPBJR01X', tipo: 3 });
+
+    expect(res.status).toBe(400);
+    expect(redis.set).not.toHaveBeenCalled();
+  });
+
+  test('CAM: NVR sin responder, no reserva', async () => {
+    estadoCamaras.mockResolvedValue(estadoHik(31, ['NVR-JR-1']));
+
+    const res = await lock({ hostname: 'CAMJRP331', tipo: 3 });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/No responde NVR-JR-1/);
+    expect(redis.set).not.toHaveBeenCalled();
+  });
+
+  test('CAM: HikCentral caído, no reserva', async () => {
+    estadoCamaras.mockRejectedValue(Object.assign(new Error('HikCentral no respondió (ETIMEDOUT)'), { status: 502 }));
+
+    const res = await lock({ hostname: 'CAMJRP331', tipo: 3 });
+
+    expect(res.status).toBe(502);
+    expect(redis.set).not.toHaveBeenCalled();
   });
 
   test('sin tipo: valida contra el AD igual', async () => {
@@ -219,5 +313,47 @@ describe('POST /lock — reservar', () => {
 
     expect(res.status).toBe(409);
     expect(res.body).toMatchObject({ locked_by: 'Otro Técnico', expires_in: 120 });
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+describe('POST / — registrar cámara', () => {
+  const cam = { hostname: 'CAMJRP331', tipo: 3, edificio: 1, floor_id: 5, sequential_number: 31 };
+
+  test('reserva en HikCentral con edificio, piso y técnico, y después guarda', async () => {
+    const res = await guardar(cam);
+
+    expect(res.status).toBe(201);
+    expect(reservarCamara).toHaveBeenCalledWith({
+      edificio: 'JR', piso: 'P3', hostname: 'CAMJRP331', creadoPor: 'Técnico Test',
+    });
+    expect(anularCamara).not.toHaveBeenCalled();
+  });
+
+  test('HikCentral ya tomó el número: no guarda nada', async () => {
+    reservarCamara.mockRejectedValue(Object.assign(
+      new Error('CAMJRP331 ya no esta libre: el proximo es CAMJRP332'), { status: 409 }));
+
+    const res = await guardar(cam);
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/el proximo es CAMJRP332/);
+    expect(db.query).not.toHaveBeenCalledWith(expect.stringMatching(/INSERT INTO nomenclatures/), expect.anything());
+  });
+
+  test('si falla el alta acá, anula la reserva en HikCentral', async () => {
+    hostnamesEnBase = ['CAMJRP331'];
+
+    const res = await guardar(cam);
+
+    expect(res.status).toBe(409);
+    expect(anularCamara).toHaveBeenCalledWith('CAMJRP331');
+  });
+
+  test('una PC no pasa por HikCentral', async () => {
+    const res = await guardar({ hostname: 'JRPBAUDPC05', tipo: 1, edificio: 1, floor_id: 1, sector: 5, sequential_number: 5 });
+
+    expect(res.status).toBe(201);
+    expect(reservarCamara).not.toHaveBeenCalled();
   });
 });

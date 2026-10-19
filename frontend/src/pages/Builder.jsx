@@ -26,6 +26,8 @@ export default function Builder() {
   const [nextNum, setNextNum] = useState('');
   // false = el AD no respondió y el número sugerido solo tiene en cuenta la base
   const [nextVerificadoAD, setNextVerificadoAD] = useState(null);
+  // Cámaras: el número lo da HikCentral; acá queda su error o aviso (NVR sin responder)
+  const [nextAviso, setNextAviso] = useState('');
   const [usuario, setUsuario] = useState('');
   const [serie, setSerie] = useState('');
   const [notas, setNotas] = useState('');
@@ -78,9 +80,21 @@ export default function Builder() {
     client.get('/nomenclatures/next', {
       params: { tipo: tipoId, edificio: edifId, sector: esComputadora ? sectorId : undefined }
     })
-      .then(res => { setNextNum(res.data.next); setNextVerificadoAD(res.data.ad_verificado); })
-      .catch(() => { setNextNum('01'); setNextVerificadoAD(null); });
-  }, [edifId, tipoId, sectorId, esComputadora, esConsultorio]);
+      .then(res => {
+        setNextNum(res.data.next); setNextVerificadoAD(res.data.ad_verificado);
+        setNextAviso(res.data.aviso_hik || '');
+      })
+      .catch(err => {
+        setNextVerificadoAD(null);
+        // Cámaras: sin HikCentral no hay número (inventar uno podría pisar una cámara de un NVR)
+        if (tipoCode === 'CAM') {
+          setNextNum('');
+          setNextAviso(err.response?.data?.error || 'No se pudo consultar el panel de Cámaras');
+        } else {
+          setNextNum('01'); setNextAviso('');
+        }
+      });
+  }, [edifId, tipoId, tipoCode, sectorId, esComputadora, esConsultorio]);
 
   // ── 5. Construcción de la cadena del Hostname usando Códigos ──────
   // Se deriva directamente de los otros estados en cada render — no hace
@@ -256,6 +270,9 @@ export default function Builder() {
                   {!esConsultorio && nextNum && nextVerificadoAD === false && (
                     <div style={s.fieldWarn}>⚠️ No se pudo consultar el AD: el número solo tiene en cuenta el sistema</div>
                   )}
+                  {!esConsultorio && tipoCode === 'CAM' && nextAviso && (
+                    <div style={s.fieldWarn}>⚠️ {nextAviso}</div>
+                  )}
                 </div>
               </div>
             </div>
@@ -266,7 +283,7 @@ export default function Builder() {
                 <div style={s.cardTitle}>Nomenclatura</div>
                 <div style={s.previewBox}>
                   <div><div style={s.previewLabel}>Impreso</div><div style={s.previewDisplay}>{display}</div></div>
-                  <div><div style={s.previewLabel}>Active Directory</div><div style={s.previewFinal}>{hostname}</div></div>
+                  <div><div style={s.previewLabel}>{tipoCode === 'CAM' ? 'Hostname (NVR)' : 'Active Directory'}</div><div style={s.previewFinal}>{hostname}</div></div>
                   <div>
                     {!locked ? <button style={s.btnPrimary} onClick={handleLock}>🔒 Reservar</button> : <div style={s.timerChip}>⏱ {fmtTime(lockTimer)}</div>}
                   </div>

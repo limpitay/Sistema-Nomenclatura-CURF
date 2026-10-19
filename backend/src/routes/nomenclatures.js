@@ -5,10 +5,28 @@ const auth = require('../middleware/auth');
 const { nextAvailableNumber } = require('../utils/nextNumber');
 const { TIPOS_EN_AD, TIPOS_GLOBALES_EN_AD, patronAD, numerosDesdeNombres } = require('../utils/hostnameAD');
 const { equipoEnAD, nombresEquiposAD } = require('../ldap');
+const { parseCam, estadoCamaras, reservarCamara, anularCamara } = require('../hikcentral');
 
 const router = express.Router();
 const LOCK_TTL = 180; // segundos — 3 minutos
 const MAX_HOSTNAME = 15; // límite de Windows para el nombre de equipo (NetBIOS)
+const pad = (n) => String(n).padStart(2, '0');
+
+// Las cámaras (CAM) no se numeran acá: el próximo libre lo decide HikCentral,
+// que ve los hostnames cargados en los NVR y las reservas (ver hikcentral.js).
+// Si HikCentral no responde no se sugiere ni se reserva nada.
+async function proximoCam(edificioId) {
+  const edif = await db.query('SELECT code FROM buildings WHERE id = $1', [edificioId]);
+  const code = edif.rows[0]?.code;
+  const estado = await estadoCamaras();
+  const b = estado.buildings.find(x => x.code === code);
+  if (!b) {
+    const err = new Error(`El panel de Cámaras no numera cámaras de ${code || 'este edificio'}`);
+    err.status = 400;
+    throw err;
+  }
+  return { next: b.nextNumber, unreachable: estado.unreachableNvrs || [] };
+}
 
 // Números ya usados en el AD por equipos que comparten contador con el que se
 // está generando (aunque no se hayan creado desde este sistema).
@@ -153,6 +171,9 @@ router.post('/', auth, async (req, res) => {
   if (!hostname || !tipo || !edificio || !sequential_number)
     return res.status(400).json({ error: 'Faltan campos obligatorios' });
 
+  // Cámara ya reservada en HikCentral cuyo alta acá todavía no se grabó: si
+  // el INSERT falla, se anula para no dejar el número tomado.
+  let camReservada = null;
   try {
     // Solo el usuario que reservó el hostname puede confirmarlo — evita que
     // otro técnico pise una reserva ajena al guardar.
@@ -160,6 +181,25 @@ router.post('/', auth, async (req, res) => {
     const existingLock = await redis.get(lockKey);
     if (existingLock && JSON.parse(existingLock).userId !== req.user.id)
       return res.status(409).json({ error: 'Hostname reservado por otro usuario' });
+
+    // CAM: primero queda reservado en HikCentral (si mientras tanto alguien
+    // tomó el número, responde 409 y no se guarda nada acá).
+    const tipoRow = await db.query('SELECT code FROM device_types WHERE id = $1', [tipo]);
+    if (tipoRow.rows[0]?.code === 'CAM') {
+      const [edif, piso] = await Promise.all([
+        db.query('SELECT code FROM buildings WHERE id = $1', [edificio]),
+        db.query('SELECT code FROM floors WHERE id = $1', [floor_id || null]),
+      ]);
+      try {
+        await reservarCamara({
+          edificio: edif.rows[0]?.code, piso: piso.rows[0]?.code, hostname, creadoPor: req.user.nombre,
+        });
+      } catch (err) {
+        if (!err.status) throw err;
+        return res.status(err.status).json({ error: `El panel de Cámaras no reservó ${hostname}: ${err.message}` });
+      }
+      camReservada = hostname;
+    }
 
     const result = await db.query(
       `INSERT INTO nomenclatures
@@ -173,6 +213,7 @@ router.post('/', auth, async (req, res) => {
       ]
     );
 
+    camReservada = null;
     await redis.del(lockKey);
 
     const nomenclature = result.rows[0];
@@ -193,6 +234,8 @@ router.post('/', auth, async (req, res) => {
 
     res.status(201).json(nomenclature);
   } catch (err) {
+    if (camReservada)
+      await anularCamara(camReservada).catch(e => console.warn(`No se pudo anular ${camReservada} en HikCentral:`, e.message));
     if (err.code === '23505')
       return res.status(409).json({ error: 'El código ya existe' });
     console.error(err);
@@ -202,7 +245,8 @@ router.post('/', auth, async (req, res) => {
 
 // Tipos cuyo correlativo es global: no depende del edificio, siempre
 // continúa la misma secuencia sin importar en qué edificio se genere.
-const CORRELATIVO_GLOBAL = ['TT', 'LL', 'CAM', 'FID'];
+// (CAM no: lo numera HikCentral, ver proximoCam)
+const CORRELATIVO_GLOBAL = ['TT', 'LL', 'FID'];
 
 // ── GET /api/nomenclatures/next ─────────────────────────────
 // Próximo número secuencial disponible para tipo+edificio+sector
@@ -216,6 +260,22 @@ router.get('/next', auth, async (req, res) => {
     const tipoRow = await db.query('SELECT code FROM device_types WHERE id = $1', [tipo]);
     if (!tipoRow.rows.length)
       return res.status(400).json({ error: 'Tipo de dispositivo inválido' });
+
+    if (tipoRow.rows[0].code === 'CAM') {
+      try {
+        const { next, unreachable } = await proximoCam(edificio);
+        return res.json({
+          next: pad(next),
+          ad_verificado: null,
+          aviso_hik: unreachable.length
+            ? `No responde ${unreachable.join(', ')}: no se va a poder reservar hasta que vuelva`
+            : null,
+        });
+      } catch (err) {
+        if (!err.status) throw err;
+        return res.status(err.status).json({ error: err.message });
+      }
+    }
 
     let query, params;
     if (CORRELATIVO_GLOBAL.includes(tipoRow.rows[0].code)) {
@@ -258,7 +318,7 @@ router.get('/next', auth, async (req, res) => {
 
     const next = nextAvailableNumber(usedNums);
 
-    res.json({ next: String(next).padStart(2, '0'), ad_verificado: adVerificado });
+    res.json({ next: pad(next), ad_verificado: adVerificado });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Error al calcular siguiente número' });
@@ -283,6 +343,28 @@ router.post('/lock', auth, async (req, res) => {
   // Si no viene el tipo se valida igual (ante la duda, mejor consultar).
   const tipoRow = tipo ? await db.query('SELECT code FROM device_types WHERE id = $1', [tipo]) : { rows: [] };
   const tipoCode = tipoRow.rows[0]?.code;
+
+  // CAM: tiene que ser justo el próximo libre según HikCentral (ahí se ven
+  // los NVR y las reservas hechas desde cualquiera de los dos sistemas).
+  if (tipoCode === 'CAM') {
+    const cam = parseCam(hostname);
+    if (!cam)
+      return res.status(400).json({ error: 'El hostname de una cámara es CAM + edificio + piso + número (ej. CAMJRP331)' });
+    try {
+      const estado = await estadoCamaras();
+      if (estado.unreachableNvrs?.length)
+        return res.status(409).json({ error: `No responde ${estado.unreachableNvrs.join(', ')}: no se puede asegurar que el número esté libre` });
+      const b = estado.buildings.find(x => x.code === cam.edificio);
+      if (!b)
+        return res.status(400).json({ error: `El panel de Cámaras no numera cámaras de ${cam.edificio}` });
+      if (b.nextNumber !== cam.numero)
+        return res.status(409).json({ error: `${hostname} ya no está libre: el próximo es CAM${cam.edificio}${cam.piso}${pad(b.nextNumber)}` });
+    } catch (err) {
+      if (!err.status) throw err;
+      return res.status(err.status).json({ error: `No se pudo verificar en el panel de Cámaras: ${err.message}` });
+    }
+  }
+
   let avisoAD = null;
   if (!tipoCode || TIPOS_EN_AD.includes(tipoCode)) {
     try {

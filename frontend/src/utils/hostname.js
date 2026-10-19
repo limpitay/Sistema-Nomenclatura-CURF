@@ -30,8 +30,15 @@ export function buildHostname({ edifCode, tipoCode, pisoCode, sectorCode, nextNu
       hostname: `${edifCode}${pisoCode}${sectorCode}${num}`,
     };
   }
+  if (tipoCode === 'CAM') {
+    // Cámaras -> CAM-Edificio-Piso-Número (mismo formato que HikCentral y los NVR, ej. CAMJRP331)
+    return {
+      display: `CAM-${edifCode}-${pisoCode}-${num}`,
+      hostname: `CAM${edifCode}${pisoCode}${num}`,
+    };
+  }
   if (sinSector) {
-    // Especiales (TT, LL, CAM, FID) -> Tipo-Piso-Edificio-Número
+    // Especiales (TT, LL, FID) -> Tipo-Piso-Edificio-Número
     return {
       display: `${tipoCode}-${pisoCode}-${edifCode}-${num}`,
       hostname: `${tipoCode}${pisoCode}${edifCode}${num}`,

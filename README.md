@@ -52,6 +52,7 @@ Sistema-Nomenclatura-CURF/
 │       ├── db.js                ← pool PostgreSQL
 │       ├── redis.js             ← cliente Redis (locks)
 │       ├── ldap.js              ← login contra Active Directory (AUTH_MODE=ldap)
+│       ├── hikcentral.js        ← número y reserva de hostnames CAM (panel HikCentral)
 │       ├── routes/
 │       │   ├── auth.js          ← login / me / config
 │       │   ├── users.js         ← ABM de usuarios (panel /admin)
@@ -259,6 +260,28 @@ columna y paginado de 25 o 50 por página. Necesita en el `.env`, además de
 dominio alcanza, puede ser el mismo que usa `ad-reorg`. Funciona con cualquier
 `AUTH_MODE`.
 
+### 📷 Cámaras (HikCentral)
+
+Las cámaras (`CAM`) usan el formato de HikCentral y los NVR: `CAM` + edificio +
+piso + número, ej. `CAMJRP331` (impreso `CAM-JR-P3-31`). El número no lo calcula
+este sistema: lo decide el panel HikCentral CURF (`Sistema-API-HIKCENTRAL`), que
+ve las cámaras de todos los NVR (Hikvision y Dahua, sección Cámaras) y las reservas, con sus reglas (Catamarca,
+Oncativo y Jacinto Ríos comparten numeración; Jockey y Suipacha, cada uno la suya).
+
+- **Número sugerido:** `/next` le pregunta a HikCentral el próximo libre del edificio.
+- **Reservar:** `/lock` verifica que siga siendo el próximo libre y toma el lock de Redis como siempre.
+- **Registrar:** antes de guardar, se reserva en HikCentral (queda en su lista de
+  pendientes con el nombre del técnico hasta que aparece en un NVR). Si mientras
+  tanto alguien tomó ese número, HikCentral responde 409 con el próximo libre y
+  acá no se guarda nada.
+- Si el panel o algún NVR (Hikvision o Dahua) no responde, **no se genera** ninguna
+  cámara: sin los NVR no se puede asegurar que el número esté libre.
+
+Necesita en el `.env` `HIKCENTRAL_URL` y `HIKCENTRAL_TOKEN` (el mismo valor que
+`NOMENCLATURA_TOKEN` en el `.env` de HikCentral). Si HikCentral tiene
+`ALLOWED_IPS`, hay que sumar la IP con la que llega el contenedor de la API
+(la del bridge de Docker, `172.x.0.1`).
+
 ### 🔐 HTTPS
 
 Mismo esquema que `ad-reorg`: en producción el nginx del contenedor `frontend`
@@ -293,9 +316,9 @@ desarrollo), sirve HTTPS con un certificado autofirmado y redirige `http://` →
 | GET | `/api/nomenclatures/catalogs/floors/:buildingId` | — | Pisos de un edificio |
 | GET | `/api/nomenclatures/catalogs/sectors` | — | Listar sectores |
 | GET | `/api/nomenclatures` | JWT | Listar nomenclaturas (filtros: tipo, edificio, estado, search) |
-| POST | `/api/nomenclatures` | JWT | Crear hostname |
-| GET | `/api/nomenclatures/next` | JWT | Próximo número secuencial disponible (PC/NB/TT/LL: también saltea los números ya usados en el AD) |
-| POST | `/api/nomenclatures/lock` | JWT | Reservar hostname (3 min, Redis). Rechaza si existe en la base o, para PC/NB/TT/LL, en el AD (todo el dominio) |
+| POST | `/api/nomenclatures` | JWT | Crear hostname (CAM: antes lo reserva en HikCentral) |
+| GET | `/api/nomenclatures/next` | JWT | Próximo número secuencial disponible (PC/NB/TT/LL: también saltea los números ya usados en el AD; CAM: lo da HikCentral) |
+| POST | `/api/nomenclatures/lock` | JWT | Reservar hostname (3 min, Redis). Rechaza si existe en la base o, para PC/NB/TT/LL, en el AD (todo el dominio); CAM: si ya no es el próximo libre en HikCentral |
 | DELETE | `/api/nomenclatures/lock/:hostname` | JWT | Liberar reserva manualmente |
 | PATCH | `/api/nomenclatures/:id` | JWT | Cambiar estado (reasignado / baja) |
 | GET | `/api/nomenclatures/:hostname/events` | JWT | Historial de estados de una nomenclatura |
