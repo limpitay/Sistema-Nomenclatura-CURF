@@ -28,6 +28,7 @@ app.use(express.json());
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/nomenclatures', require('./routes/nomenclatures'));
 app.use('/api/users', require('./routes/users'));
+app.use('/api/ad', require('./routes/ad'));
 
 // Health check
 app.get('/api/health', (req, res) => {

@@ -55,6 +55,7 @@ Sistema-Nomenclatura-CURF/
 │       ├── routes/
 │       │   ├── auth.js          ← login / me / config
 │       │   ├── users.js         ← ABM de usuarios (panel /admin)
+│       │   ├── ad.js            ← Equipos AD (solo lectura)
 │       │   └── nomenclatures.js ← catálogos / GET / POST / PATCH / lock / events
 │       └── middleware/
 │           └── auth.js          ← verificar JWT
@@ -71,6 +72,7 @@ Sistema-Nomenclatura-CURF/
 │           ├── Login.jsx
 │           ├── Builder.jsx      ← formulario de alta de hostname
 │           ├── History.jsx      ← listado + historial de eventos
+│           ├── EquiposAD.jsx    ← equipos del AD (solo lectura)
 │           └── Admin.jsx        ← administración de usuarios (solo admin)
 │
 └── docker/
@@ -246,6 +248,17 @@ docker compose -f docker-compose.prod.yml exec api npm run create-user -- \
 De ahí en adelante, las altas, ediciones y bajas de usuarios (incluido el
 borrado definitivo) se manejan desde el panel `/admin` con esa cuenta.
 
+### 🖥️ Equipos AD
+
+Sección de **solo lectura** (menú "Equipos AD", visible para todos los usuarios)
+que lista las cuentas de equipo de `LDAP_EQUIPOS_BASE` (por defecto
+`curf.net/CURF/Equipos` con todas sus subcarpetas) y marca cuáles ya tienen
+nomenclatura registrada en el sistema. Necesita en el `.env`, además de
+`LDAP_URL` y `LDAP_DOMINIO`, una cuenta de lectura del AD
+(`LDAP_LECTURA_USUARIO` / `LDAP_LECTURA_PASSWORD`): un usuario común del
+dominio alcanza, puede ser el mismo que usa `ad-reorg`. Funciona con cualquier
+`AUTH_MODE`.
+
 ### 🔐 HTTPS
 
 Mismo esquema que `ad-reorg`: en producción el nginx del contenedor `frontend`
@@ -286,6 +299,7 @@ desarrollo), sirve HTTPS con un certificado autofirmado y redirige `http://` →
 | DELETE | `/api/nomenclatures/lock/:hostname` | JWT | Liberar reserva manualmente |
 | PATCH | `/api/nomenclatures/:id` | JWT | Cambiar estado (reasignado / baja) |
 | GET | `/api/nomenclatures/:hostname/events` | JWT | Historial de estados de una nomenclatura |
+| GET | `/api/ad/equipos` | JWT | Equipos del AD (`LDAP_EQUIPOS_BASE`) cruzados con las nomenclaturas; `?refrescar=1` saltea la caché de 2 min |
 | GET | `/api/health` | — | Health check |
 
 No hay endpoint de logout: el logout es solo del lado del cliente (se borra el

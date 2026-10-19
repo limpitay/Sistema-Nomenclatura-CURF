@@ -4,6 +4,7 @@ import { useAuth } from '../context/useAuth';
 const NAV_ITEMS = [
   { to: '/', label: 'Constructor', icon: '🏗️', end: true },
   { to: '/historial', label: 'Historial', icon: '🕘', end: false },
+  { to: '/equipos-ad', label: 'Equipos AD', icon: '🖥️', end: false },
 ];
 
 export default function Layout({ children }) {

@@ -5,6 +5,7 @@ import Login   from './pages/Login';
 import Builder from './pages/Builder';
 import History from './pages/History';
 import Admin   from './pages/Admin';
+import EquiposAD from './pages/EquiposAD';
 
 function PrivateRoute({ children }) {
   const { user, loading } = useAuth();
@@ -30,6 +31,9 @@ export default function App() {
           }/>
           <Route path="/historial" element={
             <PrivateRoute><History /></PrivateRoute>
+          }/>
+          <Route path="/equipos-ad" element={
+            <PrivateRoute><EquiposAD /></PrivateRoute>
           }/>
           <Route path="/admin" element={
             <AdminRoute><Admin /></AdminRoute>
