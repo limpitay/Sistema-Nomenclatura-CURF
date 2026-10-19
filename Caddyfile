@@ -14,6 +14,11 @@
 #                 lo usa otra app. Let's Encrypt igual necesita el 80 libre.
 
 {
+	# Entrando por IP el navegador no manda SNI, y dentro de Docker caddy ve la
+	# IP del contenedor, no la del servidor: sin esto no encuentra certificado
+	# y el navegador muestra ERR_SSL_PROTOCOL_ERROR.
+	default_sni {$SITE_ADDRESS:localhost}
+
 	servers {
 		# Si alguien escribe la IP:puerto sin https:// el navegador manda HTTP
 		# al puerto HTTPS y recibiría un 400: así se lo redirige a https://.
