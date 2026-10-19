@@ -13,6 +13,17 @@
 #   PUERTO_HTTPS  443 por defecto; otro (ej. 8443) si el 443 del servidor ya
 #                 lo usa otra app. Let's Encrypt igual necesita el 80 libre.
 
+{
+	servers {
+		# Si alguien escribe la IP:puerto sin https:// el navegador manda HTTP
+		# al puerto HTTPS y recibiría un 400: así se lo redirige a https://.
+		listener_wrappers {
+			http_redirect
+			tls
+		}
+	}
+}
+
 {$SITE_ADDRESS:localhost}:{$PUERTO_HTTPS:443} {
 	tls {$TLS_ISSUER:internal}
 
