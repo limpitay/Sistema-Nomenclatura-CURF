@@ -1,6 +1,6 @@
 # 🖥️ Sistema Nomenclatura CURF
 
-Sistema centralizado para la gestión y asignación de nomenclatures de equipos, con control de colisiones en tiempo real mediante locks temporales.
+Sistema centralizado para la gestión y asignación de nomenclaturas (hostnames) de equipos, con control de colisiones en tiempo real mediante locks temporales y validación contra el Active Directory y los NVR de cámaras.
 
 ---
 
@@ -40,8 +40,11 @@ Sistema-Nomenclatura-CURF/
 ├── docker-compose.prod.yml    ← producción (ver sección de despliegue)
 ├── Dockerfile.backend
 ├── Dockerfile.frontend
-├── nginx.conf
+├── nginx.conf                 ← nginx de desarrollo (HTTP)
+├── nginx.https.conf.template  ← nginx de producción (HTTPS)
 ├── .env.example
+├── scripts/
+│   └── certificado.sh         ← genera el certificado autofirmado en certs/
 │
 ├── backend/
 │   ├── package.json
@@ -53,13 +56,18 @@ Sistema-Nomenclatura-CURF/
 │       ├── redis.js             ← cliente Redis (locks)
 │       ├── ldap.js              ← login contra Active Directory (AUTH_MODE=ldap)
 │       ├── hikcentral.js        ← número y reserva de hostnames CAM (panel HikCentral)
+│       ├── utils/
+│       │   ├── nextNumber.js    ← primer número libre de una secuencia
+│       │   ├── hostnameAD.js    ← patrones para buscar números ya usados en el AD
+│       │   └── username.js      ← normaliza el usuario de dominio a sAMAccountName
 │       ├── routes/
 │       │   ├── auth.js          ← login / me / config
 │       │   ├── users.js         ← ABM de usuarios (panel /admin)
 │       │   ├── ad.js            ← Equipos AD (solo lectura)
 │       │   └── nomenclatures.js ← catálogos / GET / POST / PATCH / lock / events
 │       └── middleware/
-│           └── auth.js          ← verificar JWT
+│           ├── auth.js          ← verificar JWT
+│           └── admin.js         ← exige rol admin
 │
 ├── frontend/
 │   ├── package.json
@@ -69,6 +77,8 @@ Sistema-Nomenclatura-CURF/
 │       ├── App.jsx              ← router
 │       ├── api/client.js        ← wrapper Axios con JWT
 │       ├── context/AuthContext.jsx
+│       ├── components/Layout.jsx ← menú lateral (Constructor, Historial, Equipos AD, Usuarios)
+│       ├── utils/hostname.js    ← arma el hostname según el tipo
 │       └── pages/
 │           ├── Login.jsx
 │           ├── Builder.jsx      ← formulario de alta de hostname
@@ -81,6 +91,23 @@ Sistema-Nomenclatura-CURF/
         ├── init.sql             ← schema + catálogos (buildings, sectors, device_types...)
         └── seed-dev.sql         ← usuarios de prueba, SOLO para desarrollo local
 ```
+
+---
+
+## 🏷️ Formatos de hostname
+
+| Tipo | Formato | Ejemplo | Numeración |
+|---|---|---|---|
+| **PC** / **NB** | Edificio + Piso + Sector + Tipo + Nº | `JRP1ADMPC04` (`JR-P1-ADM-PC-04`) | Por edificio + sector + tipo (el piso no cuenta) |
+| Consultorios (sector **CON**) | Edificio + Piso + Sector + Nº | `JRP1CON03` (`JR-P1-CON-03`) | Igual que PC/NB, sin el tipo en el nombre |
+| **TT** (Tótem) / **LL** (Llamador) | Tipo + Piso + Edificio + Nº | `TTP1JR07` (`TT-P1-JR-07`) | Correlativo global por tipo |
+| **CAM** (Cámara IP) | CAM + Edificio + Piso + Nº | `CAMJRP331` (`CAM-JR-P3-31`) | La decide HikCentral (ver Cámaras más abajo) |
+| ~~**FID**~~ (Face ID) | — | — | Deshabilitado (`TIPOS_DESHABILITADOS`) |
+
+El número va con 2 dígitos como mínimo y es el primer hueco libre de la
+secuencia (los dados de baja siguen ocupando su número). Para PC/NB/TT/LL
+también se saltean los números que ya existen en el AD (todo el dominio),
+aunque no se hayan creado desde este sistema.
 
 ---
 
@@ -328,6 +355,15 @@ desarrollo), sirve HTTPS con un certificado autofirmado y redirige `http://` →
 No hay endpoint de logout: el logout es solo del lado del cliente (se borra el
 token de `localStorage`), y el JWT expira solo según `JWT_EXPIRES`. La
 administración de usuarios (`/api/users`, solo admin) es la que usa el panel `/admin`.
+
+---
+
+## 🧪 Tests y lint
+
+```bash
+cd backend  && npm test && npm run lint   # Jest
+cd frontend && npm test && npm run lint   # Vitest
+```
 
 ---
 
