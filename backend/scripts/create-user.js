@@ -1,14 +1,18 @@
 // Crea un usuario directamente en la base de datos (además del panel de
 // administración en /admin, útil para el primer admin o desde consola). Uso:
 //   node scripts/create-user.js "Nombre Apellido" usuario contraseña [admin|technician]
+// Con AUTH_MODE=ldap se puede pasar "-" como contraseña: el usuario entra solo
+// con su clave de dominio (usuario = su sAMAccountName, ej. dvega).
 const bcrypt = require('bcrypt');
 const db = require('../src/db');
+const { normalizarUsuario } = require('../src/utils/username');
 
 async function main() {
-  const [nombre, username, password, rol = 'technician'] = process.argv.slice(2);
+  const [nombre, usuarioArg, password, rol = 'technician'] = process.argv.slice(2);
+  const username = normalizarUsuario(usuarioArg);
 
   if (!nombre || !username || !password) {
-    console.error('Uso: node scripts/create-user.js "Nombre Apellido" usuario contraseña [admin|technician]');
+    console.error('Uso: node scripts/create-user.js "Nombre Apellido" usuario contraseña|- [admin|technician]');
     process.exitCode = 1;
     return;
   }
@@ -18,7 +22,7 @@ async function main() {
     return;
   }
 
-  const hash = await bcrypt.hash(password, 10);
+  const hash = password === '-' ? null : await bcrypt.hash(password, 10);
 
   try {
     const result = await db.query(

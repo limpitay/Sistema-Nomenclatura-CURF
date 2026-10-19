@@ -4,6 +4,8 @@ const jwt = require('jsonwebtoken');
 const rateLimit = require('express-rate-limit');
 const db = require('../db');
 const auth = require('../middleware/auth');
+const { AUTH_MODE, ldap, validarCredencialesAD } = require('../ldap');
+const { normalizarUsuario } = require('../utils/username');
 
 const router = express.Router();
 
@@ -16,9 +18,16 @@ const loginLimiter = rateLimit({
   message: { error: 'Demasiados intentos de inicio de sesión. Probá de nuevo en unos minutos.' },
 });
 
+// Contraseña local (bcrypt). En modo ldap es opcional: solo la tienen las
+// cuentas de emergencia, para poder entrar si el controlador de dominio no responde.
+async function passwordLocalOk(user, password) {
+  return !!user.password && bcrypt.compare(password, user.password);
+}
+
 // POST /api/auth/login
 router.post('/login', loginLimiter, async (req, res) => {
-  const { username, password } = req.body;
+  const { password } = req.body;
+  const username = normalizarUsuario(req.body.username);
 
   if (!username || !password) {
     return res.status(400).json({
@@ -27,11 +36,13 @@ router.post('/login', loginLimiter, async (req, res) => {
   }
 
   try {
-    // Buscar usuario
+    // Buscar usuario. Aunque el login sea por dominio, solo entra quien fue
+    // dado de alta en /admin: si no está, ni se consulta al AD (así tampoco
+    // se le suman intentos fallidos a cuentas del dominio ajenas al sistema).
     const result = await db.query(
       `SELECT *
        FROM users
-       WHERE username = $1
+       WHERE LOWER(username) = $1
        AND activo = true`,
       [username]
     );
@@ -44,12 +55,26 @@ router.post('/login', loginLimiter, async (req, res) => {
 
     const user = result.rows[0];
 
-    const passwordOk = await bcrypt.compare(
-      password,
-      user.password
-    );
+    let passwordOk;
+    if (AUTH_MODE === 'ldap') {
+      try {
+        passwordOk = await validarCredencialesAD(username, password)
+          || await passwordLocalOk(user, password);
+      } catch (err) {
+        console.error('Error LDAP:', err.message);
+        if (!await passwordLocalOk(user, password)) {
+          return res.status(502).json({
+            error: 'No se pudo contactar al controlador de dominio'
+          });
+        }
+        passwordOk = true;
+      }
+    } else {
+      passwordOk = await passwordLocalOk(user, password);
+    }
 
     if (!passwordOk) {
+      console.warn(`Login fallido: ${username} desde ${req.ip}`);
       return res.status(401).json({
         error: 'Credenciales incorrectas'
       });
@@ -87,6 +112,12 @@ router.post('/login', loginLimiter, async (req, res) => {
       error: "Error interno del servidor"
     });
   }
+});
+
+// GET /api/auth/config — público: le dice al login y a /admin si las
+// contraseñas son las del dominio o locales.
+router.get('/config', (req, res) => {
+  res.json({ mode: AUTH_MODE, dominio: AUTH_MODE === 'ldap' ? ldap.dominio : null });
 });
 
 // GET /api/auth/me

@@ -1,0 +1,22 @@
+# Reverse proxy con TLS para producción (lo usa docker-compose.prod.yml).
+# Caddy termina HTTPS, redirige HTTP -> HTTPS y le pasa todo al nginx del
+# contenedor "frontend", que sigue sirviendo el SPA y proxyando /api.
+#
+# Se configura desde .env:
+#   SITE_ADDRESS  dominio (nomenclatura.curf.org) o IP del servidor (192.168.1.50)
+#   TLS_ISSUER    un email          -> certificado público de Let's Encrypt
+#                                      (requiere dominio real apuntando al server
+#                                      y puertos 80/443 accesibles desde internet)
+#                 "internal"        -> certificado de la CA interna de Caddy
+#                                      (para red interna / acceso por IP; hay que
+#                                      instalar el root.crt en las PCs, ver README)
+#   PUERTO_HTTPS  443 por defecto; otro (ej. 8443) si el 443 del servidor ya
+#                 lo usa otra app. Let's Encrypt igual necesita el 80 libre.
+
+{$SITE_ADDRESS:localhost}:{$PUERTO_HTTPS:443} {
+	tls {$TLS_ISSUER:internal}
+
+	encode gzip
+
+	reverse_proxy frontend:80
+}

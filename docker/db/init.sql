@@ -145,7 +145,7 @@ CREATE TABLE users (
   nombre VARCHAR(255) NOT NULL,
   username VARCHAR(100) NOT NULL UNIQUE, -- Login simple: usuario + contraseña (no email)
   email VARCHAR(255) UNIQUE,
-  password VARCHAR(255) NOT NULL,
+  password VARCHAR(255), -- Hash bcrypt. NULL = solo entra con su clave de dominio (AUTH_MODE=ldap)
   rol VARCHAR(50) DEFAULT 'technician',
   activo BOOLEAN DEFAULT TRUE,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP

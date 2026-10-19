@@ -4,6 +4,7 @@
 # - Redis requiere password (REDIS_PASSWORD es obligatoria, sin default).
 # - api corre con NODE_ENV=production y sin bind-mounts (usa el código de la imagen).
 # - No se monta seed-dev.sql: la base arranca solo con catálogos, sin usuarios de test.
+# - Caddy adelante de todo sirve HTTPS en 443 (y redirige 80 -> 443). Ver Caddyfile.
 #
 # Uso:
 #   cp .env.example .env   # completar con valores reales de producción
@@ -59,6 +60,7 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD}
+      TRUST_PROXY_HOPS: 2   # caddy -> nginx -> api
     depends_on:
       postgres:
         condition: service_healthy
@@ -78,16 +80,40 @@ services:
       dockerfile: Dockerfile.frontend
     container_name: sistema-nomenclatura-frontend
     restart: unless-stopped
-    ports:
-      - "80:80"
+    # Sin puertos publicados: solo se llega a través de caddy.
     depends_on:
       - api
+    networks:
+      - sistema-network
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: sistema-nomenclatura-caddy
+    restart: unless-stopped
+    # PUERTO_HTTPS se publica igual adentro y afuera del contenedor: así caddy
+    # sabe a qué puerto redirigir cuando alguien entra por http://.
+    ports:
+      - "${PUERTO_HTTP:-80}:80"
+      - "${PUERTO_HTTPS:-443}:${PUERTO_HTTPS:-443}"
+      - "${PUERTO_HTTPS:-443}:${PUERTO_HTTPS:-443}/udp"
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS}
+      PUERTO_HTTPS: ${PUERTO_HTTPS:-443}
+      TLS_ISSUER: ${TLS_ISSUER:-internal}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data        # certificados y CA interna: NO borrar este volumen
+      - caddy_config:/config
+    depends_on:
+      - frontend
     networks:
       - sistema-network
 
 volumes:
   postgres_data:
   redis_data:
+  caddy_data:
+  caddy_config:
 
 networks:
   sistema-network:

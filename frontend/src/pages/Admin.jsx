@@ -8,10 +8,13 @@ const ROL_BADGE = {
   technician:  { label: 'Técnico', bg: '#f0efe9', color: '#585754' },
 };
 
-const emptyForm = { nombre: '', username: '', email: '', password: '', rol: 'technician', activo: true };
+const emptyForm = { nombre: '', username: '', email: '', password: '', quitarPassword: false, rol: 'technician', activo: true };
 
 export default function Admin() {
-  const { user } = useAuth();
+  const { user, authConfig } = useAuth();
+  // Login por dominio: la contraseña la valida el AD; acá solo se carga
+  // opcionalmente una clave de emergencia (por si el DC no responde).
+  const esDominio = authConfig.mode === 'ldap';
 
   const [users,   setUsers]   = useState([]);
   const [loading, setLoading] = useState(true);
@@ -66,7 +69,7 @@ export default function Admin() {
 
   const openEdit = (u) => {
     setEditing(u);
-    setForm({ nombre: u.nombre, username: u.username, email: u.email || '', password: '', rol: u.rol, activo: u.activo });
+    setForm({ nombre: u.nombre, username: u.username, email: u.email || '', password: '', quitarPassword: false, rol: u.rol, activo: u.activo });
     setFormError('');
     setModalOpen(true);
   };
@@ -78,11 +81,12 @@ export default function Admin() {
       if (editing) {
         const payload = { nombre: form.nombre, username: form.username, rol: form.rol, activo: form.activo };
         if (form.password) payload.password = form.password;
+        else if (form.quitarPassword) payload.password = null;
         await client.patch(`/users/${editing.id}`, payload);
       } else {
         await client.post('/users', {
           nombre: form.nombre, username: form.username, email: form.email || undefined,
-          password: form.password, rol: form.rol,
+          password: form.password || undefined, rol: form.rol,
         });
       }
       setModalOpen(false);
@@ -231,7 +235,7 @@ export default function Admin() {
             </div>
 
             <div style={s.field}>
-              <label style={s.label}>Usuario</label>
+              <label style={s.label}>{esDominio ? `Usuario de dominio${authConfig.dominio ? ` (${authConfig.dominio})` : ''}` : 'Usuario'}</label>
               <input
                 style={s.input}
                 type="text"
@@ -239,6 +243,7 @@ export default function Admin() {
                 onChange={e => setForm({ ...form, username: e.target.value })}
                 autoCapitalize="none"
                 autoCorrect="off"
+                placeholder={esDominio ? 'ej. jperez (sin el dominio)' : undefined}
                 required
               />
             </div>
@@ -255,15 +260,36 @@ export default function Admin() {
             </div>
 
             <div style={s.field}>
-              <label style={s.label}>{editing ? 'Nueva contraseña (opcional)' : 'Contraseña'}</label>
+              <label style={s.label}>
+                {esDominio
+                  ? 'Clave de emergencia (opcional)'
+                  : editing ? 'Nueva contraseña (opcional)' : 'Contraseña'}
+              </label>
               <input
                 style={s.input}
                 type="password"
                 value={form.password}
-                onChange={e => setForm({ ...form, password: e.target.value })}
-                placeholder={editing ? 'Dejar en blanco para no cambiarla' : 'Mínimo 8 caracteres'}
-                required={!editing}
+                onChange={e => setForm({ ...form, password: e.target.value, quitarPassword: false })}
+                placeholder={editing ? 'Dejar en blanco para no cambiarla' : esDominio ? 'Dejar en blanco: entra solo con su clave de dominio' : 'Mínimo 8 caracteres'}
+                required={!editing && !esDominio}
               />
+              {esDominio && (
+                <div style={s.fieldHint}>
+                  Entra con su contraseña de Windows. La clave de emergencia (local) solo hace
+                  falta para algún admin, por si el controlador de dominio no responde; mientras
+                  esté cargada también sirve como contraseña alternativa.
+                </div>
+              )}
+              {esDominio && editing?.tiene_password && !form.password && (
+                <label style={s.checkLabel}>
+                  <input
+                    type="checkbox"
+                    checked={form.quitarPassword}
+                    onChange={e => setForm({ ...form, quitarPassword: e.target.checked })}
+                  />
+                  Quitar la clave de emergencia que tiene cargada
+                </label>
+              )}
             </div>
 
             <div style={s.grid2}>
@@ -345,6 +371,8 @@ const s = {
   modalClose: { background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#999' },
   field:      { display: 'flex', flexDirection: 'column', gap: 4 },
   label:      { fontSize: 11, fontWeight: 700, color: '#585754' },
+  fieldHint:  { fontSize: 11, color: '#999' },
+  checkLabel: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#585754', cursor: 'pointer' },
   input:      { border: '1px solid #c8c6bc', borderRadius: 6, padding: '8px 10px', fontSize: 13, outline: 'none', fontFamily: 'inherit', background: '#fff', color: '#1a1a18' },
   grid2:      { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 },
 };

@@ -7,6 +7,14 @@ export function AuthProvider({ children }) {
   // Solo hay algo que esperar si ya existe un token guardado; si no, arranca
   // sin loading (evita tener que "apagarlo" sincrónicamente dentro del efecto).
   const [loading, setLoading] = useState(() => !!localStorage.getItem('token'));
+  // { mode: 'local' | 'ldap', dominio } — si es 'ldap', las contraseñas son las del dominio
+  const [authConfig, setAuthConfig] = useState({ mode: 'local', dominio: null });
+
+  useEffect(() => {
+    client.get('/auth/config')
+      .then(res => setAuthConfig(res.data))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -31,7 +39,7 @@ export function AuthProvider({ children }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, logout, authConfig }}>
       {children}
     </AuthContext.Provider>
   );

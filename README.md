@@ -14,6 +14,7 @@ Sistema centralizado para la gestión y asignación de nomenclatures de equipos,
 | **Redis 7** | Locks temporales (3 minutos) |
 | **Docker Compose** | Orquestación de servicios |
 | **Nginx** | Proxy reverso + servir frontend |
+| **Caddy** | HTTPS en producción (certificados automáticos) |
 
 ---
 
@@ -51,8 +52,10 @@ Sistema-Nomenclatura-CURF/
 │       ├── index.js
 │       ├── db.js                ← pool PostgreSQL
 │       ├── redis.js             ← cliente Redis (locks)
+│       ├── ldap.js              ← login contra Active Directory (AUTH_MODE=ldap)
 │       ├── routes/
-│       │   ├── auth.js          ← login / me
+│       │   ├── auth.js          ← login / me / config
+│       │   ├── users.js         ← ABM de usuarios (panel /admin)
 │       │   └── nomenclatures.js ← catálogos / GET / POST / PATCH / lock / events
 │       └── middleware/
 │           └── auth.js          ← verificar JWT
@@ -69,7 +72,7 @@ Sistema-Nomenclatura-CURF/
 │           ├── Login.jsx
 │           ├── Builder.jsx      ← formulario de alta de hostname
 │           ├── History.jsx      ← listado + historial de eventos
-│           └── Admin.jsx        ← placeholder, sin implementar aún
+│           └── Admin.jsx        ← administración de usuarios (solo admin)
 │
 └── docker/
     └── db/
@@ -133,7 +136,7 @@ transiciones generado/reasignado/baja).
 | nombre | VARCHAR(255) | Nombre del técnico |
 | username | VARCHAR(100) UNIQUE | Usuario de acceso (login) |
 | email | VARCHAR(255) UNIQUE, nullable | Email de contacto (opcional) |
-| password | VARCHAR(255) | Hash bcrypt de la contraseña |
+| password | VARCHAR(255), nullable | Hash bcrypt. NULL = solo entra con su clave de dominio (`AUTH_MODE=ldap`) |
 | rol | VARCHAR(50) | `technician` (default) o `admin` |
 | activo | BOOLEAN | Estado de la cuenta |
 | created_at | TIMESTAMP | Fecha de creación |
@@ -202,30 +205,77 @@ cd Sistema-Nomenclatura-CURF
 
 cp .env.example .env
 # Completar TODOS los valores: DB_USER/DB_PASSWORD/DB_NAME, DATABASE_URL (debe
-# coincidir con esos mismos valores), REDIS_PASSWORD, CORS_ORIGIN (el dominio/IP
-# real del frontend) y JWT_SECRET (generar uno propio, ver comentario en el archivo).
+# coincidir con esos mismos valores), REDIS_PASSWORD, JWT_SECRET (generar uno
+# propio, ver comentario en el archivo), SITE_ADDRESS + TLS_ISSUER (ver HTTPS más
+# abajo) y CORS_ORIGIN=https://<SITE_ADDRESS>.
 
 docker compose -f docker-compose.prod.yml up --build -d
 ```
 
-El login es por usuario + contraseña (no email). Como todavía no hay ningún
-admin para entrar al panel `/admin`, el primer usuario se crea a mano una
-sola vez:
+### 🔑 Login
+
+`AUTH_MODE` en el `.env` define con qué contraseña entra cada uno:
+
+- **`local`** (default): usuario y contraseña propios del sistema, que se cargan en `/admin`.
+- **`ldap`**: usuario y **contraseña de Windows** del dominio (Active Directory),
+  completando también `LDAP_URL` y `LDAP_DOMINIO`. Igual **solo entra quien esté
+  dado de alta en `/admin`** con su usuario de dominio (ej. `jperez`, sin el
+  `CURF\` ni el `@curf.net`). El rol y el estado activo/inactivo se siguen
+  manejando desde `/admin`, y una cuenta deshabilitada o bloqueada en el AD no
+  puede entrar. En este modo la contraseña del formulario de `/admin` es
+  opcional: es una **clave de emergencia** (local, aparte de la del dominio)
+  que sirve para entrar si el controlador de dominio no responde. Conviene que
+  al menos un admin la tenga, y dejársela solo a quien la necesite: mientras
+  esté cargada, también funciona como contraseña alternativa.
+  El contenedor de la API tiene que llegar al DC por la red (puerto 389, o 636
+  con `ldaps://`).
+
+Como al principio no hay ningún admin para entrar a `/admin`, el primer usuario
+se crea a mano una sola vez:
 
 ```bash
+# AUTH_MODE=ldap: "-" = sin clave local, entra con su contraseña de Windows
 docker compose -f docker-compose.prod.yml exec api npm run create-user -- \
-  "Nombre Apellido" nombredeusuario "contraseña-segura" admin
+  "Nombre Apellido" jperez - admin
+
+# AUTH_MODE=local (o para darle además una clave de emergencia)
+docker compose -f docker-compose.prod.yml exec api npm run create-user -- \
+  "Nombre Apellido" jperez "contraseña-segura" admin
 ```
 
-De ahí en adelante, altas, ediciones y bajas de usuarios (incluido borrado
-definitivo) se manejan desde el panel `/admin` con esa cuenta.
+De ahí en adelante, las altas, ediciones y bajas de usuarios (incluido el
+borrado definitivo) se manejan desde el panel `/admin` con esa cuenta.
 
-**Pendiente antes de exponerlo a internet:** el compose de producción sirve
-todo por HTTP en el puerto 80. Para HTTPS hay que ponerlo detrás de un reverse
-proxy con TLS (Caddy o nginx + certbot en el host, o un servicio como
-Cloudflare Tunnel) apuntando al puerto 80 del contenedor `frontend` — requiere
-tener un dominio apuntando al servidor, así que no viene resuelto en el
-compose.
+### 🔐 HTTPS
+
+El compose de producción incluye un contenedor **Caddy** adelante de todo
+(ver `Caddyfile`): publica los puertos 80 y 443, redirige HTTP → HTTPS y saca
+y renueva el certificado solo. El contenedor `frontend` ya no publica puertos.
+Se elige el modo con dos variables del `.env`:
+
+| Escenario | `SITE_ADDRESS` | `TLS_ISSUER` |
+|---|---|---|
+| Dominio público (accesible desde internet) | `nomenclatura.curf.org` | un email, ej. `sistemas@curf.org` → Let's Encrypt |
+| Solo red interna / acceso por IP | `192.168.1.50` o un nombre interno | `internal` → CA interna de Caddy |
+
+Si el 443 del servidor ya lo usa otra aplicación, se publica en otro puerto con
+`PUERTO_HTTPS` (ej. `8443` → `https://192.168.14.167:8443`, y `CORS_ORIGIN` con
+ese mismo puerto). Quien entre por `http://` se redirige solo al puerto HTTPS.
+
+- **Let's Encrypt:** el dominio tiene que apuntar (DNS) a la IP pública del
+  servidor y los puertos 80 y 443 tienen que llegar desde internet; si no, la
+  emisión falla (`docker compose -f docker-compose.prod.yml logs caddy`).
+- **CA interna:** los navegadores van a avisar "conexión no segura" hasta que
+  se instale el certificado raíz de Caddy en cada PC (o por GPO):
+
+  ```bash
+  docker compose -f docker-compose.prod.yml cp \
+    caddy:/data/caddy/pki/authorities/local/root.crt ./curf-root.crt
+  ```
+
+  En Windows: doble click → Instalar certificado → Equipo local →
+  "Entidades de certificación raíz de confianza". El volumen `caddy_data`
+  guarda esa CA: si se borra se genera una nueva y hay que reinstalarla.
 
 ---
 
@@ -235,6 +285,7 @@ compose.
 |---|---|---|---|
 | POST | `/api/auth/login` | — | Iniciar sesión (máx. 10 intentos / 15 min por IP) |
 | GET | `/api/auth/me` | JWT | Datos del usuario autenticado |
+| GET | `/api/auth/config` | — | Modo de login (`local` / `ldap`) y dominio, para el front |
 | GET | `/api/nomenclatures/catalogs/buildings` | — | Listar edificios |
 | GET | `/api/nomenclatures/catalogs/device-types` | — | Listar tipos de dispositivo |
 | GET | `/api/nomenclatures/catalogs/floors/:buildingId` | — | Pisos de un edificio |
@@ -249,8 +300,8 @@ compose.
 | GET | `/api/health` | — | Health check |
 
 No hay endpoint de logout: el logout es solo del lado del cliente (se borra el
-token de `localStorage`), y el JWT expira solo según `JWT_EXPIRES`. Tampoco
-existe todavía un módulo de administración de usuarios vía API.
+token de `localStorage`), y el JWT expira solo según `JWT_EXPIRES`. La
+administración de usuarios (`/api/users`, solo admin) es la que usa el panel `/admin`.
 
 ---
 

@@ -18,4 +18,10 @@ pool.query('SELECT NOW()', (err, res) => {
   }
 });
 
+// Ajustes de schema para bases creadas con una versión anterior de init.sql
+// (init.sql solo corre cuando el volumen de Postgres está vacío). Tienen que
+// ser idempotentes: corren en cada arranque.
+pool.query('ALTER TABLE users ALTER COLUMN password DROP NOT NULL') // login por dominio: usuarios sin clave local
+  .catch(err => console.error('❌ No se pudo actualizar el schema de users:', err.message));
+
 module.exports = pool;

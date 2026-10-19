@@ -2,13 +2,19 @@ require('dotenv').config();
 const express = require('express');
 const cors    = require('cors');
 const helmet  = require('helmet');
+const { validarConfig: validarConfigAuth } = require('./ldap');
+
+validarConfigAuth();
 
 const app = express();
 
-// La API siempre corre detrás de nginx (1 solo hop). Sin esto, express-rate-limit
-// y req.ip ven la IP del contenedor de nginx para todos los usuarios por igual,
-// lo que rompe el límite de intentos de login (comparte el contador entre todos).
-app.set('trust proxy', 1);
+// La API siempre corre detrás de proxies: nginx en desarrollo (1 hop) y
+// caddy -> nginx en producción (2 hops, TRUST_PROXY_HOPS=2 en el compose prod).
+// Sin esto, express-rate-limit y req.ip ven la IP del contenedor del proxy para
+// todos los usuarios por igual, lo que rompe el límite de intentos de login
+// (comparte el contador entre todos). Poner más hops de los reales permite
+// falsificar la IP vía X-Forwarded-For.
+app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS) || 1);
 
 app.use(helmet());
 

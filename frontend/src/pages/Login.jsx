@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/useAuth';
 
 export default function Login() {
-  const { login } = useAuth();
+  const { login, authConfig } = useAuth();
+  const esDominio = authConfig.mode === 'ldap';
   const navigate  = useNavigate();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -30,7 +31,11 @@ export default function Login() {
         <div style={styles.brand}>
           <span style={styles.pill}>CURF</span>
           <h2 style={styles.title}>Sistema de Nomenclatura</h2>
-          <p style={styles.sub}>Ingresá con tu usuario y contraseña</p>
+          <p style={styles.sub}>
+            {esDominio
+              ? `Ingresá con tu usuario de dominio${authConfig.dominio ? ` ${authConfig.dominio}` : ''}`
+              : 'Ingresá con tu usuario y contraseña'}
+          </p>
         </div>
 
         <form onSubmit={handleSubmit} style={styles.form}>
@@ -40,7 +45,8 @@ export default function Login() {
               type="text"
               value={username}
               onChange={e => setUsername(e.target.value)}
-              placeholder="usuario"
+              placeholder={esDominio ? 'usuario de dominio (ej. jperez)' : 'usuario'}
+              autoComplete="username"
               style={styles.input}
               autoCapitalize="none"
               autoCorrect="off"

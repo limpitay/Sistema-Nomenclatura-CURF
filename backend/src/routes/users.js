@@ -3,6 +3,8 @@ const bcrypt = require('bcrypt');
 const db = require('../db');
 const auth = require('../middleware/auth');
 const requireAdmin = require('../middleware/admin');
+const { AUTH_MODE } = require('../ldap');
+const { normalizarUsuario } = require('../utils/username');
 
 const router = express.Router();
 
@@ -14,7 +16,7 @@ router.use(auth, requireAdmin);
 router.get('/', async (req, res) => {
   try {
     const { rol, estado, search } = req.query;
-    let query = `SELECT id, nombre, username, email, rol, activo, created_at FROM users WHERE 1=1`;
+    let query = `SELECT id, nombre, username, email, rol, activo, created_at, (password IS NOT NULL) AS tiene_password FROM users WHERE 1=1`;
     const params = [];
     let i = 1;
 
@@ -40,22 +42,25 @@ router.get('/', async (req, res) => {
 // ── POST /api/users ─────────────────────────────────────────
 // Crea un usuario nuevo
 router.post('/', async (req, res) => {
-  const { nombre, username, email, password, rol } = req.body;
+  const { nombre, email, password, rol } = req.body;
+  const username = normalizarUsuario(req.body.username);
 
-  if (!nombre || !username || !password)
+  // Con login por dominio la contraseña es opcional: es solo una clave de
+  // emergencia por si el controlador de dominio no responde.
+  if (!nombre || !username || (!password && AUTH_MODE !== 'ldap'))
     return res.status(400).json({ error: 'Nombre, usuario y contraseña son obligatorios' });
-  if (password.length < 8)
+  if (password && password.length < 8)
     return res.status(400).json({ error: 'La contraseña debe tener al menos 8 caracteres' });
   const rolFinal = rol || 'technician';
   if (!['admin', 'technician'].includes(rolFinal))
     return res.status(400).json({ error: 'Rol inválido' });
 
   try {
-    const hash = await bcrypt.hash(password, 10);
+    const hash = password ? await bcrypt.hash(password, 10) : null;
     const result = await db.query(
       `INSERT INTO users (nombre, username, email, password, rol)
        VALUES ($1, $2, $3, $4, $5)
-       RETURNING id, nombre, username, email, rol, activo, created_at`,
+       RETURNING id, nombre, username, email, rol, activo, created_at, (password IS NOT NULL) AS tiene_password`,
       [nombre, username, email || null, hash, rolFinal]
     );
     res.status(201).json(result.rows[0]);
@@ -68,7 +73,8 @@ router.post('/', async (req, res) => {
 });
 
 // ── PATCH /api/users/:id ────────────────────────────────────
-// Edita nombre / rol / estado activo, y opcionalmente resetea la contraseña
+// Edita nombre / rol / estado activo, y opcionalmente resetea la contraseña.
+// password: null la borra (solo con login por dominio: queda sin clave local).
 router.patch('/:id', async (req, res) => {
   const targetId = Number(req.params.id);
   const { nombre, username, rol, activo, password } = req.body;
@@ -77,6 +83,10 @@ router.patch('/:id', async (req, res) => {
     return res.status(400).json({ error: 'Rol inválido' });
   if (password && password.length < 8)
     return res.status(400).json({ error: 'La contraseña debe tener al menos 8 caracteres' });
+  if (password === null && AUTH_MODE !== 'ldap')
+    return res.status(400).json({ error: 'Con login local todos los usuarios necesitan contraseña' });
+  if (username !== undefined && !normalizarUsuario(username))
+    return res.status(400).json({ error: 'El usuario no puede quedar vacío' });
 
   const isSelf = req.user.id === targetId;
   if (isSelf && rol && rol !== 'admin')
@@ -90,13 +100,15 @@ router.patch('/:id', async (req, res) => {
     let i = 1;
 
     if (nombre !== undefined)   { fields.push(`nombre = $${i++}`);   params.push(nombre); }
-    if (username !== undefined) { fields.push(`username = $${i++}`); params.push(username); }
+    if (username !== undefined) { fields.push(`username = $${i++}`); params.push(normalizarUsuario(username)); }
     if (rol !== undefined)      { fields.push(`rol = $${i++}`);      params.push(rol); }
     if (activo !== undefined)   { fields.push(`activo = $${i++}`);   params.push(activo); }
     if (password) {
       const hash = await bcrypt.hash(password, 10);
       fields.push(`password = $${i++}`);
       params.push(hash);
+    } else if (password === null) {
+      fields.push('password = NULL');
     }
 
     if (!fields.length)
@@ -105,7 +117,7 @@ router.patch('/:id', async (req, res) => {
     params.push(targetId);
     const result = await db.query(
       `UPDATE users SET ${fields.join(', ')} WHERE id = $${i}
-       RETURNING id, nombre, username, email, rol, activo, created_at`,
+       RETURNING id, nombre, username, email, rol, activo, created_at, (password IS NOT NULL) AS tiene_password`,
       params
     );
 
