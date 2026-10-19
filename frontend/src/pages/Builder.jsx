@@ -24,6 +24,8 @@ export default function Builder() {
 
   // Campos adicionales del formulario
   const [nextNum, setNextNum] = useState('');
+  // false = el AD no respondió y el número sugerido solo tiene en cuenta la base
+  const [nextVerificadoAD, setNextVerificadoAD] = useState(null);
   const [usuario, setUsuario] = useState('');
   const [serie, setSerie] = useState('');
   const [notas, setNotas] = useState('');
@@ -76,8 +78,8 @@ export default function Builder() {
     client.get('/nomenclatures/next', {
       params: { tipo: tipoId, edificio: edifId, sector: esComputadora ? sectorId : undefined }
     })
-      .then(res => setNextNum(res.data.next))
-      .catch(() => setNextNum('01'));
+      .then(res => { setNextNum(res.data.next); setNextVerificadoAD(res.data.ad_verificado); })
+      .catch(() => { setNextNum('01'); setNextVerificadoAD(null); });
   }, [edifId, tipoId, sectorId, esComputadora, esConsultorio]);
 
   // ── 5. Construcción de la cadena del Hostname usando Códigos ──────
@@ -103,9 +105,11 @@ export default function Builder() {
     if (!hostname) return;
     setLockMsg(''); setError('');
     try {
-      const res = await client.post('/nomenclatures/lock', { hostname });
+      // tipo: el backend lo usa para saber si hay que validar contra el AD (CAM/FID no)
+      const res = await client.post('/nomenclatures/lock', { hostname, tipo: Number(tipoId) });
       setLocked(true);
       setLockTimer(res.data.expires_in);
+      if (res.data.aviso_ad) setLockMsg(`⚠️ ${res.data.aviso_ad}`);
     } catch (err) {
       const d = err.response?.data;
       if (d?.locked_by) {
@@ -249,6 +253,9 @@ export default function Builder() {
                   ) : (
                     <input style={{...s.select, background:'#f0efe9', color:'#888'}} value={nextNum} readOnly />
                   )}
+                  {!esConsultorio && nextNum && nextVerificadoAD === false && (
+                    <div style={s.fieldWarn}>⚠️ No se pudo consultar el AD: el número solo tiene en cuenta el sistema</div>
+                  )}
                 </div>
               </div>
             </div>
@@ -329,6 +336,7 @@ const s = {
   previewFinal: { fontSize:20, fontWeight:700, color:'#1a52be', fontFamily:'monospace' },
   timerChip: { background:'#e6f5ec', color:'#1a7a3c', padding:'6px 12px', borderRadius:20, fontWeight:700 },
   lockWarn: { fontSize:11, color:'#8a5a00', background:'#fdf3dc', border:'1px solid #f0d090', borderRadius:4, padding:'4px 8px' },
+  fieldWarn: { fontSize:11, color:'#8a5a00', marginTop:2 },
   btnPrimary: { background:'#1a52be', color:'#fff', border:'none', borderRadius:6, padding:'9px 18px', fontWeight:600, cursor:'pointer' },
 btnGhost:   { background:'#f8f9fa', color:'#1a52be', border:'1px solid #1a52be', borderRadius:6, padding:'8px 14px', fontSize:13, fontWeight:600, cursor:'pointer', marginRight:4 },  errorBox: { background:'#fceaea', color:'#b83030', padding:10, borderRadius:6, marginTop:10, fontSize:13 },
   savedBox: { background:'#fff', border:'1px solid #9adfc8', borderRadius:10, padding:30, textAlign:'center' },

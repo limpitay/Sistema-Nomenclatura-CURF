@@ -1,4 +1,14 @@
-const { carpetaRelativa } = require('./ldap');
+const { carpetaRelativa, rutaAD } = require('./ldap');
+
+describe('rutaAD', () => {
+  test('arma la carpeta como en la consola del AD', () => {
+    expect(rutaAD('CN=JRPBAUDPC01,OU=PC,OU=Equipos,OU=CURF,DC=curf,DC=net')).toBe('curf.net/CURF/Equipos/PC');
+  });
+
+  test('equipo recién unido en el contenedor Computers', () => {
+    expect(rutaAD('CN=JRPBAUDPC01,CN=Computers,DC=curf,DC=net')).toBe('curf.net/Computers');
+  });
+});
 
 const BASE = 'OU=Equipos,OU=CURF,DC=curf,DC=net';
 

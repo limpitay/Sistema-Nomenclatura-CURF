@@ -3,9 +3,36 @@ const db = require('../db');
 const redis = require('../redis');
 const auth = require('../middleware/auth');
 const { nextAvailableNumber } = require('../utils/nextNumber');
+const { TIPOS_EN_AD, TIPOS_GLOBALES_EN_AD, patronAD, numerosDesdeNombres } = require('../utils/hostnameAD');
+const { equipoEnAD, nombresEquiposAD } = require('../ldap');
 
 const router = express.Router();
 const LOCK_TTL = 180; // segundos — 3 minutos
+const MAX_HOSTNAME = 15; // límite de Windows para el nombre de equipo (NetBIOS)
+
+// Números ya usados en el AD por equipos que comparten contador con el que se
+// está generando (aunque no se hayan creado desde este sistema).
+async function numerosUsadosEnAD(tipoCode, edificioId, sectorId) {
+  const [edif, sector, pisos, edificios] = await Promise.all([
+    db.query('SELECT code FROM buildings WHERE id = $1', [edificioId]),
+    sectorId ? db.query('SELECT code FROM sectors WHERE id = $1', [sectorId]) : { rows: [] },
+    TIPOS_GLOBALES_EN_AD.includes(tipoCode)
+      ? db.query('SELECT DISTINCT code FROM floors')                              // TT/LL: cualquier piso
+      : db.query('SELECT code FROM floors WHERE building_id = $1', [edificioId]), // PC/NB: pisos del edificio
+    db.query('SELECT code FROM buildings'),
+  ]);
+
+  const patron = patronAD({
+    tipo: tipoCode,
+    edificio: edif.rows[0]?.code,
+    sector: sector.rows[0]?.code,
+    pisos: pisos.rows.map(r => r.code),
+    edificios: edificios.rows.map(r => r.code),
+  });
+  if (!patron) return [];
+
+  return numerosDesdeNombres(await nombresEquiposAD(patron.partes), patron.regex);
+}
 
 // Mapa entre los nombres de estado que usa el front (español) y los
 // que están cargados en nomenclature_states (inglés) — reflejan los 6 estados reales de la DB
@@ -212,9 +239,26 @@ router.get('/next', auth, async (req, res) => {
     const result = await db.query(query, params);
 
     const usedNums = result.rows.map(r => r.sequential_number);
+
+    // Los números ocupados en el AD también cuentan, así no se sugiere un
+    // hostname que después el AD rechaza. Si el AD no responde se sigue solo
+    // con la base y el front avisa que el número no se pudo verificar.
+    // ad_verificado: true / false / null (el tipo no se valida contra el AD)
+    let adVerificado = null;
+    const tipoCode = tipoRow.rows[0].code;
+    if (TIPOS_EN_AD.includes(tipoCode)) {
+      try {
+        usedNums.push(...await numerosUsadosEnAD(tipoCode, edificio, sector));
+        adVerificado = true;
+      } catch (err) {
+        console.warn('No se pudo consultar el AD para el próximo número:', err.message);
+        adVerificado = false;
+      }
+    }
+
     const next = nextAvailableNumber(usedNums);
 
-    res.json({ next: String(next).padStart(2, '0') });
+    res.json({ next: String(next).padStart(2, '0'), ad_verificado: adVerificado });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Error al calcular siguiente número' });
@@ -222,16 +266,43 @@ router.get('/next', auth, async (req, res) => {
 });
 
 // ── POST /api/nomenclatures/lock ────────────────────────────
-// Reserva un hostname por 3 minutos (Redis)
+// Reserva un hostname por 3 minutos (Redis). Antes verifica que no exista en
+// la base ni, para los tipos que se unen al dominio, en el AD.
 router.post('/lock', auth, async (req, res) => {
-  const { hostname } = req.body;
+  const { hostname, tipo } = req.body;
   if (!hostname) return res.status(400).json({ error: 'hostname requerido' });
+  if (hostname.length > MAX_HOSTNAME)
+    return res.status(400).json({ error: `El hostname tiene ${hostname.length} caracteres: Windows admite hasta ${MAX_HOSTNAME}` });
 
   const key = `lock:${hostname}`;
 
   const inDb = await db.query('SELECT id FROM nomenclatures WHERE generated_code = $1', [hostname]);
   if (inDb.rows.length > 0)
     return res.status(409).json({ error: 'Hostname ya existe en la base de datos' });
+
+  // Si no viene el tipo se valida igual (ante la duda, mejor consultar).
+  const tipoRow = tipo ? await db.query('SELECT code FROM device_types WHERE id = $1', [tipo]) : { rows: [] };
+  const tipoCode = tipoRow.rows[0]?.code;
+  let avisoAD = null;
+  if (!tipoCode || TIPOS_EN_AD.includes(tipoCode)) {
+    try {
+      const enAD = await equipoEnAD(hostname);
+      if (enAD) {
+        const detalle = [
+          enAD.ubicacion,
+          !enAD.habilitado && 'deshabilitado',
+          enAD.ultimo_login && `último login ${new Date(enAD.ultimo_login).toLocaleDateString('es-AR')}`,
+        ].filter(Boolean).join(' · ');
+        return res.status(409).json({ error: `${hostname} ya existe en el AD (${detalle})`, en_ad: enAD });
+      }
+    } catch (err) {
+      // DC caído o AD sin configurar: se deja reservar, avisando que no se verificó
+      console.warn('No se pudo verificar el hostname en el AD:', err.message);
+      avisoAD = err.status
+        ? `No se verificó en el AD: ${err.message}`
+        : 'No se pudo verificar en el AD (el controlador de dominio no respondió). Revisalo antes de unir el equipo.';
+    }
+  }
 
   // SET ... NX es atómico: si dos requests llegan al mismo tiempo para el
   // mismo hostname, solo uno consigue setear la clave (evita que ambos
@@ -252,7 +323,7 @@ router.post('/lock', auth, async (req, res) => {
     });
   }
 
-  res.json({ ok: true, hostname, expires_in: LOCK_TTL });
+  res.json({ ok: true, hostname, expires_in: LOCK_TTL, aviso_ad: avisoAD });
 });
 
 // ── DELETE /api/nomenclatures/lock/:hostname ────────────────

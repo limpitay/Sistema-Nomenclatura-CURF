@@ -294,8 +294,8 @@ desarrollo), sirve HTTPS con un certificado autofirmado y redirige `http://` →
 | GET | `/api/nomenclatures/catalogs/sectors` | — | Listar sectores |
 | GET | `/api/nomenclatures` | JWT | Listar nomenclaturas (filtros: tipo, edificio, estado, search) |
 | POST | `/api/nomenclatures` | JWT | Crear hostname |
-| GET | `/api/nomenclatures/next` | JWT | Próximo número secuencial disponible |
-| POST | `/api/nomenclatures/lock` | JWT | Reservar hostname (3 min, Redis) |
+| GET | `/api/nomenclatures/next` | JWT | Próximo número secuencial disponible (PC/NB/TT/LL: también saltea los números ya usados en el AD) |
+| POST | `/api/nomenclatures/lock` | JWT | Reservar hostname (3 min, Redis). Rechaza si existe en la base o, para PC/NB/TT/LL, en el AD (todo el dominio) |
 | DELETE | `/api/nomenclatures/lock/:hostname` | JWT | Liberar reserva manualmente |
 | PATCH | `/api/nomenclatures/:id` | JWT | Cambiar estado (reasignado / baja) |
 | GET | `/api/nomenclatures/:hostname/events` | JWT | Historial de estados de una nomenclatura |

@@ -36,11 +36,13 @@ function validarConfig() {
   console.log(`[auth] Login con credenciales de dominio (${ldap.dominio} vía ${ldap.url})`);
 }
 
-function nuevoCliente() {
+// Las consultas que hace el Builder usan un timeout más corto: si el DC no
+// responde, mejor seguir sin verificar que dejar al técnico esperando.
+function nuevoCliente(timeoutMs = 8000) {
   return new Client({
     url: ldap.url,
-    timeout: 8000,
-    connectTimeout: 8000,
+    timeout: timeoutMs,
+    connectTimeout: timeoutMs,
     // Para certificado interno/autofirmado del DC: LDAP_TLS_INSECURE=true
     ...(/^ldaps:/i.test(ldap.url) && { tlsOptions: { rejectUnauthorized: !ldap.tlsInsecure } }),
   });
@@ -73,12 +75,12 @@ function errorConfig(msg) {
 }
 
 /** Cliente ya autenticado con la cuenta de lectura (LDAP_LECTURA_USUARIO / LDAP_LECTURA_PASSWORD) */
-async function clienteLectura() {
+async function clienteLectura(timeoutMs) {
   const { url, dominio, lecturaUsuario: usuario, lecturaPassword: password } = ldap;
   if (!url || !dominio) throw errorConfig('Falta configurar LDAP_URL y LDAP_DOMINIO en el .env');
   if (!usuario || !password) throw errorConfig('Falta configurar la cuenta de lectura del AD (LDAP_LECTURA_USUARIO / LDAP_LECTURA_PASSWORD)');
 
-  const client = nuevoCliente();
+  const client = nuevoCliente(timeoutMs);
   try {
     await client.bind(/[@\\]/.test(usuario) ? usuario : `${usuario}@${dominio}`, password);
   } catch (e) {
@@ -142,4 +144,68 @@ async function equiposDelAD() {
   }
 }
 
-module.exports = { AUTH_MODE, ldap, validarConfig, validarCredencialesAD, equiposDelAD, carpetaRelativa };
+// ── Validación de hostnames contra el AD (Builder) ─────────────────────────
+// Se busca en TODO el dominio, no solo en LDAP_EQUIPOS_BASE: un equipo recién
+// unido cae en curf.net/Computers y su nombre ya está ocupado igual.
+const TIMEOUT_BUILDER = 3000;
+
+// "curf.net" -> "DC=curf,DC=net"
+const baseDominio = () => ldap.dominio.split('.').map((p) => `DC=${p}`).join(',');
+
+function escapeFilter(v) {
+  return String(v).replace(/[\\*()\0]/g, (c) => '\\' + c.charCodeAt(0).toString(16).padStart(2, '0'));
+}
+
+// "CN=X,OU=PC,OU=Equipos,OU=CURF,DC=curf,DC=net" -> "curf.net/CURF/Equipos/PC" (como "Carpeta" en la consola del AD)
+function rutaAD(dn) {
+  const partes = String(dn).split(/,(?=(?:CN|OU|DC)=)/i).map((p) => p.split('=')).map(([k, ...v]) => [k.toUpperCase(), v.join('=')]);
+  const dominio = partes.filter(([k]) => k === 'DC').map(([, v]) => v).join('.');
+  const ruta = partes.slice(1).filter(([k]) => k !== 'DC').map(([, v]) => v.replace(/\\,/g, ',')).reverse();
+  return [dominio, ...ruta].join('/');
+}
+
+/** Busca un equipo por nombre exacto. Devuelve null si no existe. */
+async function equipoEnAD(nombre) {
+  const client = await clienteLectura(TIMEOUT_BUILDER);
+  try {
+    const n = escapeFilter(nombre);
+    const { searchEntries } = await client.search(baseDominio(), {
+      scope: 'sub', sizeLimit: 1,
+      filter: `(&(objectCategory=computer)(|(cn=${n})(sAMAccountName=${n}$)))`,
+      attributes: ['cn', 'userAccountControl', 'lastLogonTimestamp'],
+    });
+    const c = searchEntries[0];
+    if (!c) return null;
+    return {
+      nombre:       texto(c.cn),
+      ubicacion:    rutaAD(c.dn),
+      habilitado:   !(Number(texto(c.userAccountControl)) & UAC_DESHABILITADA),
+      ultimo_login: fechaFiletime(c.lastLogonTimestamp),
+    };
+  } finally {
+    await client.unbind().catch(() => {});
+  }
+}
+
+/**
+ * Nombres de equipos del dominio que matchean un patrón con comodines,
+ * ej. ['JR', 'ADMPC'] -> (cn=JR*ADMPC*). Para calcular qué números ya están usados.
+ */
+async function nombresEquiposAD(partes) {
+  const client = await clienteLectura(TIMEOUT_BUILDER);
+  try {
+    const patron = partes.map(escapeFilter).join('*') + '*';
+    const { searchEntries } = await client.search(baseDominio(), {
+      scope: 'sub', filter: `(&(objectCategory=computer)(cn=${patron}))`,
+      attributes: ['cn'], paged: { pageSize: 500 },
+    });
+    return searchEntries.map((c) => texto(c.cn)).filter(Boolean);
+  } finally {
+    await client.unbind().catch(() => {});
+  }
+}
+
+module.exports = {
+  AUTH_MODE, ldap, validarConfig, validarCredencialesAD, equiposDelAD, carpetaRelativa,
+  equipoEnAD, nombresEquiposAD, rutaAD,
+};
