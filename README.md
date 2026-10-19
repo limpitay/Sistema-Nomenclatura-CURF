@@ -13,8 +13,7 @@ Sistema centralizado para la gestión y asignación de nomenclatures de equipos,
 | **PostgreSQL 15** | Base de datos principal |
 | **Redis 7** | Locks temporales (3 minutos) |
 | **Docker Compose** | Orquestación de servicios |
-| **Nginx** | Proxy reverso + servir frontend |
-| **Caddy** | HTTPS en producción (certificados automáticos) |
+| **Nginx** | Proxy reverso + servir frontend (+ HTTPS en producción) |
 
 ---
 
@@ -206,9 +205,10 @@ cd Sistema-Nomenclatura-CURF
 cp .env.example .env
 # Completar TODOS los valores: DB_USER/DB_PASSWORD/DB_NAME, DATABASE_URL (debe
 # coincidir con esos mismos valores), REDIS_PASSWORD, JWT_SECRET (generar uno
-# propio, ver comentario en el archivo), SITE_ADDRESS + TLS_ISSUER (ver HTTPS más
-# abajo) y CORS_ORIGIN=https://<SITE_ADDRESS>.
+# propio, ver comentario en el archivo), PUERTO_HTTPS (ver HTTPS más abajo) y
+# CORS_ORIGIN=https://<IP-del-servidor>:<PUERTO_HTTPS>.
 
+bash scripts/certificado.sh   # certificado HTTPS, una sola vez (ver HTTPS más abajo)
 docker compose -f docker-compose.prod.yml up --build -d
 ```
 
@@ -248,34 +248,23 @@ borrado definitivo) se manejan desde el panel `/admin` con esa cuenta.
 
 ### 🔐 HTTPS
 
-El compose de producción incluye un contenedor **Caddy** adelante de todo
-(ver `Caddyfile`): publica los puertos 80 y 443, redirige HTTP → HTTPS y saca
-y renueva el certificado solo. El contenedor `frontend` ya no publica puertos.
-Se elige el modo con dos variables del `.env`:
+Mismo esquema que `ad-reorg`: en producción el nginx del contenedor `frontend`
+usa `nginx.https.conf.template` (en vez de `nginx.conf`, que queda para
+desarrollo), sirve HTTPS con un certificado autofirmado y redirige `http://` →
+`https://`.
 
-| Escenario | `SITE_ADDRESS` | `TLS_ISSUER` |
-|---|---|---|
-| Dominio público (accesible desde internet) | `nomenclatura.curf.org` | un email, ej. `sistemas@curf.org` → Let's Encrypt |
-| Solo red interna / acceso por IP | `192.168.1.50` o un nombre interno | `internal` → CA interna de Caddy |
-
-Si el 443 del servidor ya lo usa otra aplicación, se publica en otro puerto con
-`PUERTO_HTTPS` (ej. `8443` → `https://192.168.14.167:8443`, y `CORS_ORIGIN` con
-ese mismo puerto). Quien entre por `http://` se redirige solo al puerto HTTPS.
-
-- **Let's Encrypt:** el dominio tiene que apuntar (DNS) a la IP pública del
-  servidor y los puertos 80 y 443 tienen que llegar desde internet; si no, la
-  emisión falla (`docker compose -f docker-compose.prod.yml logs caddy`).
-- **CA interna:** los navegadores van a avisar "conexión no segura" hasta que
-  se instale el certificado raíz de Caddy en cada PC (o por GPO):
-
-  ```bash
-  docker compose -f docker-compose.prod.yml cp \
-    caddy:/data/caddy/pki/authorities/local/root.crt ./curf-root.crt
-  ```
-
-  En Windows: doble click → Instalar certificado → Equipo local →
-  "Entidades de certificación raíz de confianza". El volumen `caddy_data`
-  guarda esa CA: si se borra se genera una nueva y hay que reinstalarla.
+- **Certificado:** `bash scripts/certificado.sh` lo genera en `certs/` (no se
+  sube a git) para el hostname y las IPs del servidor, válido 825 días. Para
+  otros nombres: `bash scripts/certificado.sh nomenclatura.curf.net 192.168.14.167`.
+  Si hay una CA interna, se puede dejar ahí un certificado de ella con los
+  mismos nombres (`nomenclatura.crt` / `nomenclatura.key`).
+- **Puertos:** `PUERTO_HTTPS` (443 por defecto) y `PUERTO_HTTP` (80, solo
+  redirige). En el servidor de CURF el 443 es de `ad-reorg`, así que se usa
+  `PUERTO_HTTPS=8443` → `https://192.168.14.167:8443`, con `CORS_ORIGIN` en
+  ese mismo puerto.
+- **Aviso "No seguro":** los navegadores lo muestran hasta que se instala
+  `certs/nomenclatura.crt` en cada PC (doble click → Instalar certificado →
+  Equipo local → "Entidades de certificación raíz de confianza"), o por GPO.
 
 ---
 

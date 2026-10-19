@@ -13,6 +13,9 @@ build/
 .env.local
 .env.*.local
 
+# Certificado HTTPS de producción (lo genera scripts/certificado.sh en cada servidor)
+certs/
+
 # Logs
 npm-debug.log*
 yarn-debug.log*
