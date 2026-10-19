@@ -12,6 +12,11 @@ const LOCK_TTL = 180; // segundos — 3 minutos
 const MAX_HOSTNAME = 15; // límite de Windows para el nombre de equipo (NetBIOS)
 const pad = (n) => String(n).padStart(2, '0');
 
+// Tipos que por ahora no se pueden generar: no aparecen en el catálogo y la API
+// los rechaza. Para habilitarlos de nuevo, sacarlos de la lista.
+const TIPOS_DESHABILITADOS = ['FID'];
+const TIPO_DESHABILITADO = { error: 'Este tipo de dispositivo está deshabilitado' };
+
 // Las cámaras (CAM) no se numeran acá: el próximo libre lo decide HikCentral,
 // que ve los hostnames cargados en los NVR y las reservas (ver hikcentral.js).
 // Si HikCentral no responde no se sugiere ni se reserva nada.
@@ -78,7 +83,10 @@ router.get('/catalogs/buildings', async (req, res) => {
 // GET /api/nomenclatures/catalogs/device-types
 router.get('/catalogs/device-types', async (req, res) => {
   try {
-    const result = await db.query('SELECT id, code, name FROM device_types ORDER BY name ASC');
+    const result = await db.query(
+      'SELECT id, code, name FROM device_types WHERE code <> ALL($1) ORDER BY name ASC',
+      [TIPOS_DESHABILITADOS]
+    );
     res.json(result.rows);
   } catch (err) {
     console.error(err);
@@ -185,6 +193,8 @@ router.post('/', auth, async (req, res) => {
     // CAM: primero queda reservado en HikCentral (si mientras tanto alguien
     // tomó el número, responde 409 y no se guarda nada acá).
     const tipoRow = await db.query('SELECT code FROM device_types WHERE id = $1', [tipo]);
+    if (TIPOS_DESHABILITADOS.includes(tipoRow.rows[0]?.code))
+      return res.status(400).json(TIPO_DESHABILITADO);
     if (tipoRow.rows[0]?.code === 'CAM') {
       const [edif, piso] = await Promise.all([
         db.query('SELECT code FROM buildings WHERE id = $1', [edificio]),
@@ -260,6 +270,8 @@ router.get('/next', auth, async (req, res) => {
     const tipoRow = await db.query('SELECT code FROM device_types WHERE id = $1', [tipo]);
     if (!tipoRow.rows.length)
       return res.status(400).json({ error: 'Tipo de dispositivo inválido' });
+    if (TIPOS_DESHABILITADOS.includes(tipoRow.rows[0].code))
+      return res.status(400).json(TIPO_DESHABILITADO);
 
     if (tipoRow.rows[0].code === 'CAM') {
       try {
@@ -343,6 +355,8 @@ router.post('/lock', auth, async (req, res) => {
   // Si no viene el tipo se valida igual (ante la duda, mejor consultar).
   const tipoRow = tipo ? await db.query('SELECT code FROM device_types WHERE id = $1', [tipo]) : { rows: [] };
   const tipoCode = tipoRow.rows[0]?.code;
+  if (TIPOS_DESHABILITADOS.includes(tipoCode))
+    return res.status(400).json(TIPO_DESHABILITADO);
 
   // CAM: tiene que ser justo el próximo libre según HikCentral (ahí se ven
   // los NVR y las reservas hechas desde cualquiera de los dos sistemas).

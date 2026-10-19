@@ -312,7 +312,7 @@ desarrollo), sirve HTTPS con un certificado autofirmado y redirige `http://` →
 | GET | `/api/auth/me` | JWT | Datos del usuario autenticado |
 | GET | `/api/auth/config` | — | Modo de login (`local` / `ldap`) y dominio, para el front |
 | GET | `/api/nomenclatures/catalogs/buildings` | — | Listar edificios |
-| GET | `/api/nomenclatures/catalogs/device-types` | — | Listar tipos de dispositivo |
+| GET | `/api/nomenclatures/catalogs/device-types` | — | Listar tipos de dispositivo (sin los de `TIPOS_DESHABILITADOS`, hoy FID, que la API también rechaza) |
 | GET | `/api/nomenclatures/catalogs/floors/:buildingId` | — | Pisos de un edificio |
 | GET | `/api/nomenclatures/catalogs/sectors` | — | Listar sectores |
 | GET | `/api/nomenclatures` | JWT | Listar nomenclaturas (filtros: tipo, edificio, estado, search) |

@@ -26,7 +26,7 @@ app.use(express.json());
 app.use('/api/nomenclatures', router);
 
 // ── Base simulada ───────────────────────────────────────────
-const TIPOS = { 1: 'PC', 3: 'CAM', 4: 'TT' };
+const TIPOS = { 1: 'PC', 3: 'CAM', 4: 'TT', 6: 'FID' };
 const EDIFICIOS = { 1: 'JR', 2: 'ON', 6: 'LI' };
 const SECTORES = { 5: 'AUD' };
 const PISOS = [
@@ -48,6 +48,8 @@ let hostnamesEnBase; // generated_code que ya existen (para /lock)
 const filas = (arr) => ({ rows: arr });
 
 db.query.mockImplementation(async (sql, params = []) => {
+  if (/FROM device_types WHERE code <> ALL/.test(sql))
+    return filas(Object.entries(TIPOS).filter(([, code]) => !params[0].includes(code)).map(([id, code]) => ({ id: Number(id), code })));
   if (/FROM device_types WHERE id/.test(sql))
     return filas(TIPOS[params[0]] ? [{ code: TIPOS[params[0]] }] : []);
   if (/SELECT sequential_number FROM nomenclatures/.test(sql))
@@ -355,5 +357,36 @@ describe('POST / — registrar cámara', () => {
 
     expect(res.status).toBe(201);
     expect(reservarCamara).not.toHaveBeenCalled();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+describe('Tipos deshabilitados (FID)', () => {
+  test('no aparece en el catálogo', async () => {
+    const res = await request(app).get('/api/nomenclatures/catalogs/device-types');
+
+    expect(res.status).toBe(200);
+    expect(res.body.map(t => t.code)).toEqual(['PC', 'CAM', 'TT']);
+  });
+
+  test('/next lo rechaza', async () => {
+    const res = await next({ tipo: 6, edificio: 1 });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/deshabilitado/);
+  });
+
+  test('/lock lo rechaza sin reservar', async () => {
+    const res = await lock({ hostname: 'FIDPBJR01', tipo: 6 });
+
+    expect(res.status).toBe(400);
+    expect(redis.set).not.toHaveBeenCalled();
+  });
+
+  test('el alta lo rechaza sin guardar', async () => {
+    const res = await guardar({ hostname: 'FIDPBJR01', tipo: 6, edificio: 1, floor_id: 1, sequential_number: 1 });
+
+    expect(res.status).toBe(400);
+    expect(db.query).not.toHaveBeenCalledWith(expect.stringMatching(/INSERT INTO nomenclatures/), expect.anything());
   });
 });
