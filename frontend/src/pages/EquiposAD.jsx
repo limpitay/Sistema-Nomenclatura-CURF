@@ -2,8 +2,8 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import client from '../api/client';
 import Layout from '../components/Layout';
 
-// Sección de solo lectura: equipos del AD (LDAP_EQUIPOS_BASE) cruzados con las
-// nomenclaturas del sistema. Los filtros y el orden son del lado del cliente.
+// Sección de solo lectura: equipos del AD (LDAP_EQUIPOS_BASE).
+// Búsqueda, orden y paginado son del lado del cliente.
 
 const COLUMNAS = [
   { key: 'nombre',       label: 'Nombre' },
@@ -13,8 +13,9 @@ const COLUMNAS = [
   { key: 'descripcion',  label: 'Descripción' },
   { key: 'creado',       label: 'Creado' },
   { key: 'habilitado',   label: 'Estado' },
-  { key: 'en_nomenclatura', label: 'Nomenclatura' },
 ];
+
+const TAMANIOS_PAGINA = [25, 50];
 
 const fmtFecha = (iso) => iso
   ? new Date(iso).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })
@@ -30,10 +31,9 @@ export default function EquiposAD() {
   const [error,   setError]   = useState('');
 
   const [search,   setSearch]   = useState('');
-  const [carpeta,  setCarpeta]  = useState('todas');
-  const [estado,   setEstado]   = useState('todos');
-  const [nomencl,  setNomencl]  = useState('todos');
   const [orden,    setOrden]    = useState({ key: 'nombre', asc: true });
+  const [pagina,   setPagina]   = useState(1);
+  const [porPagina, setPorPagina] = useState(25);
 
   const fetchEquipos = useCallback(async (refrescar = false) => {
     setLoading(true); setError('');
@@ -52,20 +52,10 @@ export default function EquiposAD() {
 
   const items = useMemo(() => datos?.items || [], [datos]);
 
-  // Carpetas con su cantidad, para el desplegable
-  const carpetas = useMemo(() => {
-    const cuenta = new Map();
-    for (const e of items) cuenta.set(e.carpeta, (cuenta.get(e.carpeta) || 0) + 1);
-    return [...cuenta].sort(([a], [b]) => a.localeCompare(b));
-  }, [items]);
-
   const filtrados = useMemo(() => {
     const q = search.trim().toLowerCase();
     const lista = items.filter(e =>
-      (!q || e.nombre?.toLowerCase().includes(q) || e.descripcion?.toLowerCase().includes(q)) &&
-      (carpeta === 'todas' || e.carpeta === carpeta) &&
-      (estado === 'todos' || (estado === 'habilitados') === e.habilitado) &&
-      (nomencl === 'todos' || (nomencl === 'con') === e.en_nomenclatura)
+      !q || e.nombre?.toLowerCase().includes(q) || e.descripcion?.toLowerCase().includes(q)
     );
     const { key, asc } = orden;
     return lista.sort((a, b) => {
@@ -73,15 +63,19 @@ export default function EquiposAD() {
       const cmp = typeof va === 'boolean' ? Number(va) - Number(vb) : String(va).localeCompare(String(vb), 'es', { numeric: true });
       return asc ? cmp : -cmp;
     });
-  }, [items, search, carpeta, estado, nomencl, orden]);
+  }, [items, search, orden]);
 
-  const ordenarPor = (key) => setOrden(o => ({ key, asc: o.key === key ? !o.asc : true }));
+  // Cambiar búsqueda, orden o tamaño de página vuelve a la página 1
+  const ordenarPor = (key) => { setOrden(o => ({ key, asc: o.key === key ? !o.asc : true })); setPagina(1); };
+  const buscar = (valor) => { setSearch(valor); setPagina(1); };
+  const cambiarPorPagina = (n) => { setPorPagina(n); setPagina(1); };
 
-  const hayFiltros = search || carpeta !== 'todas' || estado !== 'todos' || nomencl !== 'todos';
-  const clearFilters = () => { setSearch(''); setCarpeta('todas'); setEstado('todos'); setNomencl('todos'); };
+  const totalPaginas = Math.max(1, Math.ceil(filtrados.length / porPagina));
+  const paginaActual = Math.min(pagina, totalPaginas);
+  const desde = (paginaActual - 1) * porPagina;
+  const visibles = filtrados.slice(desde, desde + porPagina);
 
   const deshabilitados = items.filter(e => !e.habilitado).length;
-  const sinNomenclatura = items.filter(e => !e.en_nomenclatura).length;
 
   return (
     <Layout>
@@ -99,7 +93,7 @@ export default function EquiposAD() {
             {datos && (
               <span style={s.meta}>
                 Leído del AD {fmtHora(datos.leido_en)} · {items.length} equipos
-                {deshabilitados > 0 && ` (${deshabilitados} deshabilitados)`} · {sinNomenclatura} sin nomenclatura
+                {deshabilitados > 0 && ` (${deshabilitados} deshabilitados)`}
               </span>
             )}
             <button style={{ ...s.btnPrimary, opacity: loading ? .6 : 1 }} disabled={loading} onClick={() => fetchEquipos(true)}>
@@ -110,42 +104,31 @@ export default function EquiposAD() {
 
         {error && <div style={s.errorBox}>{error}</div>}
 
-        {/* ── Filtros ── */}
+        {/* ── Búsqueda ── */}
         <div style={s.card}>
           <div style={s.filterRow}>
             <input
               style={s.searchInput}
               value={search}
-              onChange={e => setSearch(e.target.value)}
+              onChange={e => buscar(e.target.value)}
               placeholder="Buscar por nombre o descripción…"
             />
-
-            <select style={s.select} value={carpeta} onChange={e => setCarpeta(e.target.value)}>
-              <option value="todas">Todas las carpetas ({items.length})</option>
-              {carpetas.map(([c, n]) => (
-                <option key={c} value={c}>{c || '(raíz)'} ({n})</option>
-              ))}
-            </select>
-
-            <select style={s.select} value={estado} onChange={e => setEstado(e.target.value)}>
-              <option value="todos">Habilitados y deshabilitados</option>
-              <option value="habilitados">Solo habilitados</option>
-              <option value="deshabilitados">Solo deshabilitados</option>
-            </select>
-
-            <select style={s.select} value={nomencl} onChange={e => setNomencl(e.target.value)}>
-              <option value="todos">Con y sin nomenclatura</option>
-              <option value="con">Con nomenclatura</option>
-              <option value="sin">Sin nomenclatura</option>
-            </select>
-
-            {hayFiltros && <button style={s.btnGhost} onClick={clearFilters}>Limpiar filtros</button>}
+            {search && <button style={s.btnGhost} onClick={() => buscar('')}>Limpiar</button>}
           </div>
         </div>
 
         {/* ── Tabla ── */}
         <div style={s.card}>
-          <div style={s.cardTitle}>Equipos ({filtrados.length})</div>
+          <div style={s.tableHeader}>
+            <div style={s.cardTitle}>Equipos ({filtrados.length})</div>
+            <label style={s.pageSizeLabel}>
+              Mostrar
+              <select style={s.select} value={porPagina} onChange={e => cambiarPorPagina(Number(e.target.value))}>
+                {TAMANIOS_PAGINA.map(n => <option key={n} value={n}>{n}</option>)}
+              </select>
+              por página
+            </label>
+          </div>
 
           {loading && !datos ? (
             <div style={s.empty}>Leyendo el AD…</div>
@@ -164,7 +147,7 @@ export default function EquiposAD() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtrados.map(e => (
+                  {visibles.map(e => (
                     <tr key={e.nombre + e.carpeta} style={{ ...s.tr, ...(e.habilitado ? {} : { color: '#999' }) }}>
                       <td style={{ ...s.td, fontFamily: 'monospace', fontWeight: 600 }}>{e.nombre}</td>
                       <td style={s.td}>{e.carpeta || '(raíz)'}</td>
@@ -177,15 +160,25 @@ export default function EquiposAD() {
                           ? <span style={{ ...s.badge, background: '#e6f5ec', color: '#1a7a3c' }}>Habilitado</span>
                           : <span style={{ ...s.badge, background: '#fceaea', color: '#b83030' }}>Deshabilitado</span>}
                       </td>
-                      <td style={s.td}>
-                        {e.en_nomenclatura
-                          ? <span style={{ ...s.badge, background: '#eef2fb', color: '#1a52be' }}>Registrado</span>
-                          : <span style={{ ...s.badge, background: '#fdf3dc', color: '#8a5a00' }}>Sin registrar</span>}
-                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {filtrados.length > 0 && (
+            <div style={s.pager}>
+              <span style={s.meta}>
+                Mostrando {desde + 1}–{Math.min(desde + porPagina, filtrados.length)} de {filtrados.length}
+              </span>
+              <div style={s.pagerBtns}>
+                <button style={s.btnPage} disabled={paginaActual === 1} onClick={() => setPagina(1)}>«</button>
+                <button style={s.btnPage} disabled={paginaActual === 1} onClick={() => setPagina(paginaActual - 1)}>‹ Anterior</button>
+                <span style={s.pageInfo}>Página {paginaActual} de {totalPaginas}</span>
+                <button style={s.btnPage} disabled={paginaActual === totalPaginas} onClick={() => setPagina(paginaActual + 1)}>Siguiente ›</button>
+                <button style={s.btnPage} disabled={paginaActual === totalPaginas} onClick={() => setPagina(totalPaginas)}>»</button>
+              </div>
             </div>
           )}
         </div>
@@ -203,7 +196,13 @@ const s = {
   headerRight:{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' },
   meta:       { fontSize: 12, color: '#777' },
   card:       { background: '#fff', border: '1px solid #dddbd3', borderRadius: 10, padding: 20, marginBottom: 14 },
-  cardTitle:  { fontSize: 14, fontWeight: 700, marginBottom: 14 },
+  cardTitle:  { fontSize: 14, fontWeight: 700 },
+  tableHeader:{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 14 },
+  pageSizeLabel: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#585754' },
+  pager:      { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginTop: 14 },
+  pagerBtns:  { display: 'flex', alignItems: 'center', gap: 6 },
+  pageInfo:   { fontSize: 13, color: '#585754', padding: '0 6px' },
+  btnPage:    { fontSize: 12, padding: '5px 10px', borderRadius: 4, cursor: 'pointer', border: '1px solid #c8c6bc', background: '#fff', color: '#585754' },
   filterRow:  { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
   searchInput:{ flex: 1, minWidth: 220, border: '1px solid #c8c6bc', borderRadius: 6, padding: '8px 12px', fontSize: 13, outline: 'none', background: '#fff', color: '#1a1a18' },
   select:     { border: '1px solid #c8c6bc', borderRadius: 6, padding: '8px 10px', fontSize: 13, outline: 'none', background: '#fff', color: '#1a1a18' },

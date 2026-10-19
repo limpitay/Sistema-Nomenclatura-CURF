@@ -252,8 +252,8 @@ borrado definitivo) se manejan desde el panel `/admin` con esa cuenta.
 
 Sección de **solo lectura** (menú "Equipos AD", visible para todos los usuarios)
 que lista las cuentas de equipo de `LDAP_EQUIPOS_BASE` (por defecto
-`curf.net/CURF/Equipos` con todas sus subcarpetas) y marca cuáles ya tienen
-nomenclatura registrada en el sistema. Necesita en el `.env`, además de
+`curf.net/CURF/Equipos` con todas sus subcarpetas), con búsqueda, orden por
+columna y paginado de 25 o 50 por página. Necesita en el `.env`, además de
 `LDAP_URL` y `LDAP_DOMINIO`, una cuenta de lectura del AD
 (`LDAP_LECTURA_USUARIO` / `LDAP_LECTURA_PASSWORD`): un usuario común del
 dominio alcanza, puede ser el mismo que usa `ad-reorg`. Funciona con cualquier
@@ -299,7 +299,7 @@ desarrollo), sirve HTTPS con un certificado autofirmado y redirige `http://` →
 | DELETE | `/api/nomenclatures/lock/:hostname` | JWT | Liberar reserva manualmente |
 | PATCH | `/api/nomenclatures/:id` | JWT | Cambiar estado (reasignado / baja) |
 | GET | `/api/nomenclatures/:hostname/events` | JWT | Historial de estados de una nomenclatura |
-| GET | `/api/ad/equipos` | JWT | Equipos del AD (`LDAP_EQUIPOS_BASE`) cruzados con las nomenclaturas; `?refrescar=1` saltea la caché de 2 min |
+| GET | `/api/ad/equipos` | JWT | Equipos del AD (`LDAP_EQUIPOS_BASE`); `?refrescar=1` saltea la caché de 2 min |
 | GET | `/api/health` | — | Health check |
 
 No hay endpoint de logout: el logout es solo del lado del cliente (se borra el
