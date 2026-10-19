@@ -94,6 +94,7 @@ export default function EquiposAD() {
               <span style={s.meta}>
                 Leído del AD {fmtHora(datos.leido_en)} · {items.length} equipos
                 {deshabilitados > 0 && ` (${deshabilitados} deshabilitados)`}
+                {' · '}{datos.nomenclaturas_creadas} nomenclaturas creadas en el sistema
               </span>
             )}
             <button style={{ ...s.btnPrimary, opacity: loading ? .6 : 1 }} disabled={loading} onClick={() => fetchEquipos(true)}>

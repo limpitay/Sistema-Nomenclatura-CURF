@@ -1,4 +1,5 @@
 const express = require('express');
+const db = require('../db');
 const auth = require('../middleware/auth');
 const { equiposDelAD, ldap } = require('../ldap');
 
@@ -12,14 +13,22 @@ const DURACION = 2 * 60 * 1000;
 let cache = null;
 
 // ── GET /api/ad/equipos ─────────────────────────────────────
-// Equipos de LDAP_EQUIPOS_BASE.
+// Equipos de LDAP_EQUIPOS_BASE, más el total de nomenclaturas creadas en el
+// sistema (se cuenta siempre en el momento, no se cachea).
 router.get('/equipos', async (req, res) => {
   try {
     if (!cache || req.query.refrescar || Date.now() - cache.en > DURACION) {
       cache = { en: Date.now(), items: await equiposDelAD(), leido_en: new Date().toISOString() };
     }
 
-    res.json({ base: ldap.equiposBase, leido_en: cache.leido_en, items: cache.items });
+    const result = await db.query('SELECT COUNT(*)::int AS total FROM nomenclatures');
+
+    res.json({
+      base: ldap.equiposBase,
+      leido_en: cache.leido_en,
+      items: cache.items,
+      nomenclaturas_creadas: result.rows[0].total,
+    });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
     console.error('Error LDAP (equipos):', err.message);
