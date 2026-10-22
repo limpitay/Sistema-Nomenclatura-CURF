@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import client from '../api/client';
 import Layout from '../components/Layout';
+import { IconoOU, IconoEquipo } from '../components/IconosAD';
 
 // Sección de solo lectura: equipos del AD (LDAP_EQUIPOS_BASE).
 // Búsqueda, orden y paginado son del lado del cliente.
@@ -150,8 +151,12 @@ export default function EquiposAD() {
                 <tbody>
                   {visibles.map(e => (
                     <tr key={e.nombre + e.carpeta} style={{ ...s.tr, ...(e.habilitado ? {} : { color: '#999' }) }}>
-                      <td style={{ ...s.td, fontFamily: 'monospace', fontWeight: 600 }}>{e.nombre}</td>
-                      <td style={s.td}>{e.carpeta || '(raíz)'}</td>
+                      <td style={{ ...s.td, fontFamily: 'monospace', fontWeight: 600 }}>
+                        <span style={s.conIcono}><IconoEquipo deshabilitado={!e.habilitado} />{e.nombre}</span>
+                      </td>
+                      <td style={s.td}>
+                        <span style={s.conIcono}><IconoOU size={14} />{e.carpeta || '(raíz)'}</span>
+                      </td>
                       <td style={s.td}>{e.so || '—'}</td>
                       <td style={{ ...s.td, ...s.mono }}>{fmtFecha(e.ultimo_login)}</td>
                       <td style={{ ...s.td, color: '#666' }}>{e.descripcion || '—'}</td>
@@ -212,6 +217,7 @@ const s = {
   tr:         { borderBottom: '1px solid #f0efe9' },
   td:         { padding: '8px 10px', verticalAlign: 'middle' },
   mono:       { fontSize: 12, fontFamily: 'monospace', whiteSpace: 'nowrap' },
+  conIcono:   { display: 'inline-flex', alignItems: 'center', gap: 7 },
   badge:      { fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 10, whiteSpace: 'nowrap' },
   btnPrimary: { background: '#1a52be', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer' },
   btnGhost:   { background: '#f8f9fa', color: '#1a52be', border: '1px solid #1a52be', borderRadius: 6, padding: '8px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer' },

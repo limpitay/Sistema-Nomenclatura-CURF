@@ -63,7 +63,7 @@ Sistema-Nomenclatura-CURF/
 │       ├── routes/
 │       │   ├── auth.js          ← login / me / config
 │       │   ├── users.js         ← ABM de usuarios (panel /admin)
-│       │   ├── ad.js            ← Equipos AD (solo lectura)
+│       │   ├── ad.js            ← Equipos AD y Áreas AD (solo lectura)
 │       │   └── nomenclatures.js ← catálogos / GET / POST / PATCH / lock / events
 │       └── middleware/
 │           ├── auth.js          ← verificar JWT
@@ -77,13 +77,14 @@ Sistema-Nomenclatura-CURF/
 │       ├── App.jsx              ← router
 │       ├── api/client.js        ← wrapper Axios con JWT
 │       ├── context/AuthContext.jsx
-│       ├── components/Layout.jsx ← menú lateral (Constructor, Historial, Equipos AD, Usuarios)
+│       ├── components/Layout.jsx ← menú lateral (Constructor, Historial, Equipos AD, Áreas AD, Usuarios)
 │       ├── utils/hostname.js    ← arma el hostname según el tipo
 │       └── pages/
 │           ├── Login.jsx
 │           ├── Builder.jsx      ← formulario de alta de hostname
 │           ├── History.jsx      ← listado + historial de eventos
 │           ├── EquiposAD.jsx    ← equipos del AD (solo lectura)
+│           ├── AreasAD.jsx      ← equipos del AD por Edificio / Área
 │           └── Admin.jsx        ← administración de usuarios (solo admin)
 │
 └── docker/
@@ -287,6 +288,19 @@ columna y paginado de 25 o 50 por página. Necesita en el `.env`, además de
 dominio alcanza, puede ser el mismo que usa `ad-reorg`. Funciona con cualquier
 `AUTH_MODE`.
 
+### 🏢 Áreas AD
+
+Sección de **solo lectura** (menú "Áreas AD") con la misma configuración que
+Equipos AD, pero organizada como la consola del AD: un árbol
+`Edificio / Área` armado con las OUs de `LDAP_EQUIPOS_BASE`
+(`curf.net/CURF/Equipos/Edificio/Área/equipo`), incluidas las áreas sin equipos.
+Los edificios (Catamarca, Hindu, Jacinto Rios, Jockey, Oncativo, Suipacha;
+lista `EDIFICIOS` en `AreasAD.jsx`) van arriba y resaltados; el resto de las OUs
+(PC, NB, Totems, EquiposSinCategorizar…) queda agrupado en "Otras OU".
+Al elegir un edificio o un área se listan sus equipos; las OUs más profundas que
+el área aparecen como subcarpeta del equipo. El buscador encuentra un equipo en
+todas las áreas a la vez.
+
 ### 📷 Cámaras (HikCentral)
 
 Las cámaras (`CAM`) usan el formato de HikCentral y los NVR: `CAM` + edificio +
@@ -350,6 +364,7 @@ desarrollo), sirve HTTPS con un certificado autofirmado y redirige `http://` →
 | PATCH | `/api/nomenclatures/:id` | JWT | Cambiar estado (reasignado / baja) |
 | GET | `/api/nomenclatures/:hostname/events` | JWT | Historial de estados de una nomenclatura |
 | GET | `/api/ad/equipos` | JWT | Equipos del AD (`LDAP_EQUIPOS_BASE`); `?refrescar=1` saltea la caché de 2 min |
+| GET | `/api/ad/areas` | JWT | OUs de `LDAP_EQUIPOS_BASE` + equipos, para la vista por Edificio / Área (misma caché) |
 | GET | `/api/health` | — | Health check |
 
 No hay endpoint de logout: el logout es solo del lado del cliente (se borra el

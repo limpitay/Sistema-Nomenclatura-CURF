@@ -144,6 +144,26 @@ async function equiposDelAD() {
   }
 }
 
+/**
+ * OUs debajo de LDAP_EQUIPOS_BASE como carpetas relativas, ej. "Jacinto Rios/Auditoria Medica"
+ * (sección "Áreas AD": así aparecen también las áreas que todavía no tienen equipos).
+ */
+async function ousDelAD() {
+  if (!ldap.equiposBase) throw errorConfig('Falta configurar LDAP_EQUIPOS_BASE en el .env (ej. OU=Equipos,OU=CURF,DC=curf,DC=net)');
+
+  const client = await clienteLectura();
+  try {
+    const { searchEntries } = await client.search(ldap.equiposBase, {
+      scope: 'sub', filter: '(objectClass=organizationalUnit)', paged: { pageSize: 500 },
+      attributes: ['ou'],
+    });
+    // carpetaRelativa descarta el primer componente (el CN del equipo): acá se le antepone uno ficticio
+    return searchEntries.map((o) => carpetaRelativa(`CN=_,${o.dn}`, ldap.equiposBase)).filter(Boolean);
+  } finally {
+    await client.unbind().catch(() => {});
+  }
+}
+
 // ── Validación de hostnames contra el AD (Builder) ─────────────────────────
 // Se busca en TODO el dominio, no solo en LDAP_EQUIPOS_BASE: un equipo recién
 // unido cae en curf.net/Computers y su nombre ya está ocupado igual.
@@ -206,6 +226,6 @@ async function nombresEquiposAD(partes) {
 }
 
 module.exports = {
-  AUTH_MODE, ldap, validarConfig, validarCredencialesAD, equiposDelAD, carpetaRelativa,
+  AUTH_MODE, ldap, validarConfig, validarCredencialesAD, equiposDelAD, ousDelAD, carpetaRelativa,
   equipoEnAD, nombresEquiposAD, rutaAD,
 };
