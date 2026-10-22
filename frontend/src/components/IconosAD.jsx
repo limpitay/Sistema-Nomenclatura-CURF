@@ -1,5 +1,5 @@
 // Íconos al estilo de la consola "Usuarios y equipos de Active Directory",
-// para las secciones Equipos AD y Áreas AD.
+// para la sección Equipos por Área.
 
 const base = (size) => ({
   width: size, height: size, flexShrink: 0, verticalAlign: 'middle', display: 'inline-block',

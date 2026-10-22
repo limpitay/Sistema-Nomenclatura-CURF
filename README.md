@@ -63,7 +63,7 @@ Sistema-Nomenclatura-CURF/
 │       ├── routes/
 │       │   ├── auth.js          ← login / me / config
 │       │   ├── users.js         ← ABM de usuarios (panel /admin)
-│       │   ├── ad.js            ← Equipos AD y Áreas AD (solo lectura)
+│       │   ├── ad.js            ← Equipos por Área (solo lectura)
 │       │   └── nomenclatures.js ← catálogos / GET / POST / PATCH / lock / events
 │       └── middleware/
 │           ├── auth.js          ← verificar JWT
@@ -77,13 +77,12 @@ Sistema-Nomenclatura-CURF/
 │       ├── App.jsx              ← router
 │       ├── api/client.js        ← wrapper Axios con JWT
 │       ├── context/AuthContext.jsx
-│       ├── components/Layout.jsx ← menú lateral (Constructor, Historial, Equipos AD, Áreas AD, Usuarios)
+│       ├── components/Layout.jsx ← menú lateral (Constructor, Historial, Equipos por Área, Usuarios)
 │       ├── utils/hostname.js    ← arma el hostname según el tipo
 │       └── pages/
 │           ├── Login.jsx
 │           ├── Builder.jsx      ← formulario de alta de hostname
 │           ├── History.jsx      ← listado + historial de eventos
-│           ├── EquiposAD.jsx    ← equipos del AD (solo lectura)
 │           ├── AreasAD.jsx      ← equipos del AD por Edificio / Área
 │           └── Admin.jsx        ← administración de usuarios (solo admin)
 │
@@ -277,29 +276,23 @@ docker compose -f docker-compose.prod.yml exec api npm run create-user -- \
 De ahí en adelante, las altas, ediciones y bajas de usuarios (incluido el
 borrado definitivo) se manejan desde el panel `/admin` con esa cuenta.
 
-### 🖥️ Equipos AD
+### 🏢 Equipos por Área
 
-Sección de **solo lectura** (menú "Equipos AD", visible para todos los usuarios)
-que lista las cuentas de equipo de `LDAP_EQUIPOS_BASE` (por defecto
-`curf.net/CURF/Equipos` con todas sus subcarpetas), con búsqueda, orden por
-columna y paginado de 25 o 50 por página. Necesita en el `.env`, además de
-`LDAP_URL` y `LDAP_DOMINIO`, una cuenta de lectura del AD
-(`LDAP_LECTURA_USUARIO` / `LDAP_LECTURA_PASSWORD`): un usuario común del
-dominio alcanza, puede ser el mismo que usa `ad-reorg`. Funciona con cualquier
-`AUTH_MODE`.
-
-### 🏢 Áreas AD
-
-Sección de **solo lectura** (menú "Áreas AD") con la misma configuración que
-Equipos AD, pero organizada como la consola del AD: un árbol
-`Edificio / Área` armado con las OUs de `LDAP_EQUIPOS_BASE`
-(`curf.net/CURF/Equipos/Edificio/Área/equipo`), incluidas las áreas sin equipos.
+Sección de **solo lectura** (menú "Equipos por Área", visible para todos los
+usuarios) organizada como la consola del AD: un árbol `Edificio / Área` armado
+con las OUs de `LDAP_EQUIPOS_BASE` (por defecto `curf.net/CURF/Equipos`:
+`curf.net/CURF/Equipos/Edificio/Área/equipo`), incluidas las áreas sin equipos.
 Los edificios (Catamarca, Hindu, Jacinto Rios, Jockey, Oncativo, Suipacha;
 lista `EDIFICIOS` en `AreasAD.jsx`) van arriba y resaltados; el resto de las OUs
 (PC, NB, Totems, EquiposSinCategorizar…) queda agrupado en "Otras OU".
 Al elegir un edificio o un área se listan sus equipos; las OUs más profundas que
 el área aparecen como subcarpeta del equipo. El buscador encuentra un equipo en
 todas las áreas a la vez.
+
+Necesita en el `.env`, además de `LDAP_URL` y `LDAP_DOMINIO`, una cuenta de
+lectura del AD (`LDAP_LECTURA_USUARIO` / `LDAP_LECTURA_PASSWORD`): un usuario
+común del dominio alcanza, puede ser el mismo que usa `ad-reorg`. Funciona con
+cualquier `AUTH_MODE`.
 
 ### 📷 Cámaras (HikCentral)
 
@@ -363,8 +356,7 @@ desarrollo), sirve HTTPS con un certificado autofirmado y redirige `http://` →
 | DELETE | `/api/nomenclatures/lock/:hostname` | JWT | Liberar reserva manualmente |
 | PATCH | `/api/nomenclatures/:id` | JWT | Cambiar estado (reasignado / baja) |
 | GET | `/api/nomenclatures/:hostname/events` | JWT | Historial de estados de una nomenclatura |
-| GET | `/api/ad/equipos` | JWT | Equipos del AD (`LDAP_EQUIPOS_BASE`); `?refrescar=1` saltea la caché de 2 min |
-| GET | `/api/ad/areas` | JWT | OUs de `LDAP_EQUIPOS_BASE` + equipos, para la vista por Edificio / Área (misma caché) |
+| GET | `/api/ad/areas` | JWT | OUs de `LDAP_EQUIPOS_BASE` + equipos, para la sección Equipos por Área; `?refrescar=1` saltea la caché de 2 min |
 | GET | `/api/health` | — | Health check |
 
 No hay endpoint de logout: el logout es solo del lado del cliente (se borra el

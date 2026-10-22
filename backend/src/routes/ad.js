@@ -1,9 +1,8 @@
 const express = require('express');
-const db = require('../db');
 const auth = require('../middleware/auth');
 const { equiposDelAD, ousDelAD, ldap } = require('../ldap');
 
-// Secciones "Equipos AD" y "Áreas AD": lectura en vivo del AD (no hay rutas que escriban)
+// Sección "Equipos por Área": lectura en vivo del AD (no hay rutas que escriban)
 const router = express.Router();
 router.use(auth);
 
@@ -30,28 +29,9 @@ function errorAD(res, err, que) {
   });
 }
 
-// ── GET /api/ad/equipos ─────────────────────────────────────
-// Equipos de LDAP_EQUIPOS_BASE, más el total de nomenclaturas creadas en el
-// sistema (se cuenta siempre en el momento, no se cachea).
-router.get('/equipos', async (req, res) => {
-  try {
-    const equipos = await cacheado('equipos', equiposDelAD, req.query.refrescar);
-    const result = await db.query('SELECT COUNT(*)::int AS total FROM nomenclatures');
-
-    res.json({
-      base: ldap.equiposBase,
-      leido_en: equipos.leido_en,
-      items: equipos.datos,
-      nomenclaturas_creadas: result.rows[0].total,
-    });
-  } catch (err) {
-    errorAD(res, err, 'equipos');
-  }
-});
-
 // ── GET /api/ad/areas ───────────────────────────────────────
 // OUs de LDAP_EQUIPOS_BASE (Edificio/Área/...) y los equipos, para agruparlos
-// por área en el cliente. Comparte la caché de equipos con /equipos.
+// por área en el cliente.
 router.get('/areas', async (req, res) => {
   try {
     const [ous, equipos] = await Promise.all([

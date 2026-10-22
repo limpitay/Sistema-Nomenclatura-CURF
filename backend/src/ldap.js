@@ -1,7 +1,7 @@
 // Active Directory:
 // - Login (AUTH_MODE=ldap): solo valida la contraseña con un bind usuario@dominio;
 //   quién puede entrar y con qué rol lo sigue decidiendo la tabla users (alta desde /admin).
-// - Consultas de solo lectura (sección "Equipos AD") con la cuenta LDAP_LECTURA_*.
+// - Consultas de solo lectura (sección "Equipos por Área") con la cuenta LDAP_LECTURA_*.
 const { Client } = require('ldapts');
 
 const AUTH_MODE = (process.env.AUTH_MODE || 'local').toLowerCase(); // 'local' | 'ldap'
@@ -120,7 +120,7 @@ function carpetaRelativa(dn, base) {
     .join('/');
 }
 
-/** Cuentas de equipo debajo de LDAP_EQUIPOS_BASE (sección de solo lectura "Equipos AD") */
+/** Cuentas de equipo debajo de LDAP_EQUIPOS_BASE (sección de solo lectura "Equipos por Área") */
 async function equiposDelAD() {
   if (!ldap.equiposBase) throw errorConfig('Falta configurar LDAP_EQUIPOS_BASE en el .env (ej. OU=Equipos,OU=CURF,DC=curf,DC=net)');
 
@@ -146,7 +146,7 @@ async function equiposDelAD() {
 
 /**
  * OUs debajo de LDAP_EQUIPOS_BASE como carpetas relativas, ej. "Jacinto Rios/Auditoria Medica"
- * (sección "Áreas AD": así aparecen también las áreas que todavía no tienen equipos).
+ * (sección "Equipos por Área": así aparecen también las áreas que todavía no tienen equipos).
  */
 async function ousDelAD() {
   if (!ldap.equiposBase) throw errorConfig('Falta configurar LDAP_EQUIPOS_BASE en el .env (ej. OU=Equipos,OU=CURF,DC=curf,DC=net)');

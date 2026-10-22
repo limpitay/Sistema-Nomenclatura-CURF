@@ -179,7 +179,7 @@ export default function AreasAD() {
         {/* ── Encabezado ── */}
         <div style={s.header}>
           <div>
-            <div style={s.title}>Áreas AD</div>
+            <div style={s.title}>Equipos por Área</div>
             <div style={s.sub}>
               Solo lectura · Edificio / Área / Equipo
               {datos?.base ? <> · <span style={{ fontFamily: 'monospace' }}>{datos.base}</span></> : null}
