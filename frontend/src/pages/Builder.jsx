@@ -302,7 +302,7 @@ export default function Builder() {
                     style={{...s.input, ...(!TIPOS_CON_USUARIO.includes(tipoCode) ? {background:'#f0efe9', color:'#999'} : {})}} 
                     value={usuario} 
                     onChange={e => setUsuario(e.target.value)} 
-                    placeholder={TIPOS_CON_USUARIO.includes(tipoCode) ? "usuario.apellido" : "No aplica"} 
+                    placeholder={TIPOS_CON_USUARIO.includes(tipoCode) ? "username" : "No aplica"} 
                     disabled={!TIPOS_CON_USUARIO.includes(tipoCode)}
                   />
                 </div>
